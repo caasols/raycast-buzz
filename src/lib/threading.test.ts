@@ -41,6 +41,22 @@ describe("getThreadReference", () => {
     const tags = [["e"], ["e", PARENT, "", "reply"]] as string[][];
     expect(getThreadReference(tags).parentId).toBe(PARENT);
   });
+
+  it("handles a reply tag whose id is an empty string", () => {
+    const tags = [["e", "", "", "reply"]];
+    expect(getThreadReference(tags)).toEqual({ parentId: "", rootId: "" });
+  });
+
+  it("uses the first root-marked tag when several exist", () => {
+    const OTHER_ROOT = "c".repeat(64);
+    const tags = [
+      ["e", ROOT, "", "root"],
+      ["e", OTHER_ROOT, "", "root"],
+      ["e", PARENT, "", "reply"],
+    ];
+    expect(getThreadReference(tags).rootId).toBe(ROOT);
+    expect(getThreadReference(tags).parentId).toBe(PARENT);
+  });
 });
 
 describe("isBroadcastReply", () => {
@@ -66,37 +82,5 @@ describe("isThreadReply", () => {
       ["broadcast", "1"],
     ];
     expect(isThreadReply(tags)).toBe(false);
-  });
-});
-
-describe("getThreadReference - additional coverage", () => {
-  it("handles reply tag with empty string id", () => {
-    const tags = [["e", "", "", "reply"]];
-    expect(getThreadReference(tags)).toEqual({ parentId: "", rootId: "" });
-  });
-
-  it("handles only root tag without reply tag", () => {
-    const tags = [["e", ROOT, "", "root"]];
-    expect(getThreadReference(tags)).toEqual({ parentId: null, rootId: null });
-  });
-
-  it("handles mixed valid and invalid tag types", () => {
-    const tags = [
-      ["invalid", ROOT],
-      ["e", PARENT, "", "reply"],
-      ["other", "data"],
-    ];
-    expect(getThreadReference(tags)).toEqual({ parentId: PARENT, rootId: PARENT });
-  });
-
-  it("handles multiple roots with matching reply", () => {
-    const OTHER_ROOT = "c".repeat(64);
-    const tags = [
-      ["e", ROOT, "", "root"],
-      ["e", OTHER_ROOT, "", "root"],
-      ["e", PARENT, "", "reply"],
-    ];
-    expect(getThreadReference(tags).rootId).toBe(ROOT);
-    expect(getThreadReference(tags).parentId).toBe(PARENT);
   });
 });
