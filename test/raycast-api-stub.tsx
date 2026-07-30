@@ -195,24 +195,26 @@ function FormDropdownItem(props: { value: string; title?: string }) {
   return <option value={props.value}>{props.title}</option>;
 }
 
-function FormDropdown(props: { id: string; title?: string; children?: ReactNode }) {
+function FormDropdown(props: { id: string; title?: string; children?: ReactNode; defaultValue?: string }) {
   const ctx = useFormContext();
   const values: string[] = [];
   Children.forEach(props.children, (child) => {
     if (isValidElement<{ value: string }>(child)) values.push(child.props.value);
   });
   const first = values[0] ?? "";
+  // Honour an explicit defaultValue when it names a real item, matching Raycast;
+  // otherwise fall back to preselecting the first item, as before.
+  const selected = props.defaultValue !== undefined && values.includes(props.defaultValue) ? props.defaultValue : first;
 
   useEffect(() => {
-    // Raycast preselects the first item; with no items the value stays empty.
-    ctx?.setValue(props.id, first);
-  }, [first]);
+    ctx?.setValue(props.id, selected);
+  }, [selected]);
 
   return (
     <select
       data-testid={`field-${props.id}`}
       aria-label={props.title}
-      defaultValue={first}
+      defaultValue={selected}
       onChange={(e) => ctx?.setValue(props.id, e.target.value)}
     >
       {props.children}
