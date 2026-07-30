@@ -153,7 +153,7 @@ function ListItem(props: {
   title?: string;
   subtitle?: string;
   actions?: ReactNode;
-  accessories?: { text?: string; date?: Date }[];
+  accessories?: { text?: string; date?: Date; tag?: unknown; icon?: unknown }[];
   icon?: unknown;
   section?: string;
 }) {
@@ -164,7 +164,7 @@ function ListItem(props: {
       data-subtitle={props.subtitle}
       data-icon={iconAttr(props.icon)}
       data-section={props.section}
-      data-accessories={props.accessories?.map((a) => a.text ?? "").join(" ")}
+      data-accessories={props.accessories?.map((a) => a.text ?? (a.date ? a.date.toISOString() : "")).join(" ")}
     >
       {props.actions}
     </div>
