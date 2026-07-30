@@ -56,11 +56,14 @@ describe("Set Status list", () => {
     expect(rendered[0]).toHaveAttribute("data-title", "in a meeting");
   });
 
-  it("falls back to the emoji when the status text is empty", async () => {
+  it("falls back to a text label (not the emoji) when the status text is empty", async () => {
     mocks.getClient.mockReturnValue(fakeClient({ getStatus: vi.fn(async () => ({ text: "", emoji: "\u{1F4C5}" })) }));
     render(<Command />);
     const rendered = await items();
-    expect(rendered[0]).toHaveAttribute("data-title", "\u{1F4C5}");
+    // The emoji is carried by `icon` (see the icon/subtitle test below); the
+    // title must be a plain label so the emoji isn't shown twice.
+    expect(rendered[0]).toHaveAttribute("data-title", "Status set");
+    expect(rendered[0]).toHaveAttribute("data-icon", "\u{1F4C5}");
   });
 
   it("shows the status emoji as the row icon, not the subtitle", async () => {
@@ -269,11 +272,26 @@ describe("Set Status list", () => {
     );
     render(<Command />);
     await items();
-    expect(action("Set Custom Status")).toHaveAttribute("data-shortcut", "cmd+n");
-    expect(action("Create Preset")).toHaveAttribute("data-shortcut", "shift+cmd+n");
-    expect(action("Clear Status")).toHaveAttribute("data-shortcut", "ctrl+x");
-    expect(action("Edit Preset")).toHaveAttribute("data-shortcut", "cmd+e");
-    expect(action("Delete Preset")).toHaveAttribute("data-shortcut", "ctrl+x");
+    // Rendered as "<macOS>/<Windows>" by the stub's shortcutAttr(); both
+    // Set Custom Status and Edit Preset go through Keyboard.Shortcut.Common
+    // (New / Edit), the rest are the platform-form shortcut objects.
+    expect(action("Set Custom Status")).toHaveAttribute("data-shortcut", "cmd+n/ctrl+n");
+    expect(action("Create Preset")).toHaveAttribute("data-shortcut", "shift+cmd+n/shift+ctrl+n");
+    expect(action("Clear Status")).toHaveAttribute("data-shortcut", "ctrl+x/ctrl+x");
+    expect(action("Edit Preset")).toHaveAttribute("data-shortcut", "cmd+e/ctrl+e");
+    expect(action("Delete Preset")).toHaveAttribute("data-shortcut", "ctrl+x/ctrl+x");
+  });
+
+  it("marks Clear Status and Delete Preset as destructive", async () => {
+    mocks.getClient.mockReturnValue(
+      fakeClient({ getStatus: vi.fn(async () => ({ text: "in a meeting", emoji: "" })) }),
+    );
+    render(<Command />);
+    await items();
+    expect(action("Clear Status")).toHaveAttribute("data-style", "destructive");
+    expect(action("Delete Preset")).toHaveAttribute("data-style", "destructive");
+    // Non-destructive actions are left at the stub's default (no data-style).
+    expect(action("Set Custom Status")).not.toHaveAttribute("data-style");
   });
 
   it("opens the custom status form", async () => {

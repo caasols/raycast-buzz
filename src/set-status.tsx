@@ -1,4 +1,4 @@
-import { List, ActionPanel, Action, Icon, showToast, Toast, useNavigation } from "@raycast/api";
+import { List, ActionPanel, Action, Icon, showToast, Toast, useNavigation, Keyboard } from "@raycast/api";
 import { usePromise } from "@raycast/utils";
 import { getClient } from "./lib/preferences";
 import { ErrorView } from "./components/error-view";
@@ -70,7 +70,7 @@ export default function Command() {
     <Action.Push
       title="Set Custom Status"
       icon={Icon.Pencil}
-      shortcut={{ modifiers: ["cmd"], key: "n" }}
+      shortcut={Keyboard.Shortcut.Common.New}
       target={
         <StatusForm
           submitTitle="Set Status"
@@ -86,7 +86,10 @@ export default function Command() {
     <Action.Push
       title="Create Preset"
       icon={Icon.PlusSquare}
-      shortcut={{ modifiers: ["shift", "cmd"], key: "n" }}
+      shortcut={{
+        macOS: { modifiers: ["shift", "cmd"], key: "n" },
+        Windows: { modifiers: ["shift", "ctrl"], key: "n" },
+      }}
       target={
         <StatusForm
           submitTitle="Create Preset"
@@ -117,7 +120,7 @@ export default function Command() {
       <List.Section title="Current Status">
         <List.Item
           key="current-status"
-          title={statusError ? "Could not load status" : status ? status.text || status.emoji : "No status"}
+          title={statusError ? "Could not load status" : status ? status.text || "Status set" : "No status"}
           subtitle={statusError ?? undefined}
           icon={statusError ? Icon.Warning : status?.emoji || undefined}
           actions={
@@ -127,7 +130,8 @@ export default function Command() {
                 <Action
                   title="Clear Status"
                   icon={Icon.XMarkCircle}
-                  shortcut={{ modifiers: ["ctrl"], key: "x" }}
+                  shortcut={{ macOS: { modifiers: ["ctrl"], key: "x" }, Windows: { modifiers: ["ctrl"], key: "x" } }}
+                  style={Action.Style.Destructive}
                   onAction={clear}
                 />
               )}
@@ -148,7 +152,7 @@ export default function Command() {
                 <Action.Push
                   title="Edit Preset"
                   icon={Icon.Pencil}
-                  shortcut={{ modifiers: ["cmd"], key: "e" }}
+                  shortcut={Keyboard.Shortcut.Common.Edit}
                   target={
                     <StatusForm
                       submitTitle="Save Preset"
@@ -174,7 +178,8 @@ export default function Command() {
                 <Action
                   title="Delete Preset"
                   icon={Icon.Trash}
-                  shortcut={{ modifiers: ["ctrl"], key: "x" }}
+                  shortcut={{ macOS: { modifiers: ["ctrl"], key: "x" }, Windows: { modifiers: ["ctrl"], key: "x" } }}
+                  style={Action.Style.Destructive}
                   onAction={() => removePreset(preset.id)}
                 />
                 {createPresetAction}

@@ -44,6 +44,18 @@ export const useNavigation = () => ({ push, pop });
 export const Icon = new Proxy({}, { get: (_t, name) => String(name) }) as Record<string, string>;
 export const Color = new Proxy({}, { get: (_t, name) => String(name) }) as Record<string, string>;
 
+// A trimmed stand-in for the real `Keyboard.Shortcut.Common` table (values
+// taken from @raycast/api's own type declarations). Extend with more entries
+// if a command starts using them; only New/Edit are needed today.
+export const Keyboard = {
+  Shortcut: {
+    Common: {
+      New: { macOS: { modifiers: ["cmd"], key: "n" }, Windows: { modifiers: ["ctrl"], key: "n" } },
+      Edit: { macOS: { modifiers: ["cmd"], key: "e" }, Windows: { modifiers: ["ctrl"], key: "e" } },
+    },
+  },
+};
+
 // @raycast/utils' usePromise reads environment.launchType before reporting a
 // failure, so it has to be present or every rejected promise becomes an
 // unhandled error instead of reaching the component's error branch.
@@ -101,10 +113,24 @@ function iconAttr(icon: unknown): string | undefined {
   return icon === undefined || icon === null ? undefined : String(icon);
 }
 
+type SimpleShortcut = { modifiers?: string[]; key?: string };
+
+function formatSimpleShortcut(shortcut?: SimpleShortcut): string | undefined {
+  if (!shortcut) return undefined;
+  return [...(shortcut.modifiers ?? []), shortcut.key].filter(Boolean).join("+");
+}
+
+// A `Keyboard.Shortcut` is either the simple `{ modifiers, key }` form or a
+// per-platform `{ macOS, Windows }` form (used whenever an extension declares
+// more than one platform, per @raycast's `no-ambiguous-platform-shortcut`
+// rule). Rendered as "<macOS>/<Windows>" so both halves are assertable.
 function shortcutAttr(shortcut: unknown): string | undefined {
   if (!shortcut || typeof shortcut !== "object") return undefined;
-  const { modifiers, key } = shortcut as { modifiers?: string[]; key?: string };
-  return [...(modifiers ?? []), key].filter(Boolean).join("+");
+  const s = shortcut as SimpleShortcut & { macOS?: SimpleShortcut; Windows?: SimpleShortcut; windows?: SimpleShortcut };
+  if (s.macOS || s.Windows || s.windows) {
+    return [formatSimpleShortcut(s.macOS), formatSimpleShortcut(s.Windows ?? s.windows)].filter(Boolean).join("/");
+  }
+  return formatSimpleShortcut(s);
 }
 
 /* --------------------------------------------------------------------- List */
@@ -300,19 +326,28 @@ ActionPanel.Section = (props: { children?: ReactNode; title?: string }) => (
   <div data-testid="action-panel-section">{props.children}</div>
 );
 
-export function Action(props: { title: string; onAction?: () => void; icon?: unknown; shortcut?: unknown }) {
+export function Action(props: {
+  title: string;
+  onAction?: () => void;
+  icon?: unknown;
+  shortcut?: unknown;
+  style?: unknown;
+}) {
   return (
     <button
       data-testid="action"
       data-title={props.title}
       data-icon={iconAttr(props.icon)}
       data-shortcut={shortcutAttr(props.shortcut)}
+      data-style={props.style === undefined ? undefined : String(props.style)}
       onClick={() => props.onAction?.()}
     >
       {props.title}
     </button>
   );
 }
+
+Action.Style = { Regular: "regular", Destructive: "destructive" };
 
 function ActionPush(props: { title: string; target: ReactNode; icon?: unknown; shortcut?: unknown }) {
   const [pushed, setPushed] = useState(false);
