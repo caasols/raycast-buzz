@@ -15,12 +15,13 @@ export function getThreadReference(tags: string[][]): ThreadReference {
     return { parentId: null, rootId: null };
   }
   const rootTag = eventTags.find((tag) => tag[3] === "root");
-  const replyTag = [...eventTags].reverse().find((tag) => tag[3] === "reply") ?? /* c8 ignore next */ null;
+  const replyTag = [...eventTags].reverse().find((tag) => tag[3] === "reply") ?? null;
   if (!replyTag) {
     return { parentId: null, rootId: null };
   }
+  // replyTag[1] is always a string due to filter on line 13, so ?? null is unreachable
   const parentId = replyTag[1] ?? /* c8 ignore next */ null;
-  return { parentId, rootId: rootTag?.[1] ?? /* c8 ignore next */ parentId };
+  return { parentId, rootId: rootTag?.[1] ?? parentId };
 }
 
 /**
