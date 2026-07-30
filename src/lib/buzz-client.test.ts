@@ -434,4 +434,13 @@ describe("BuzzClient.getStatus", () => {
     ]);
     expect(await client.getStatus()).toEqual({ text: "new", emoji: "" });
   });
+
+  it("still uses the newest event when it is the first in the list", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    vi.spyOn(client, "query").mockResolvedValue([
+      ev({ kind: 30315, created_at: 99, content: "new", tags: [["d", "general"]] }),
+      ev({ kind: 30315, created_at: 10, content: "old", tags: [["d", "general"]] }),
+    ]);
+    expect(await client.getStatus()).toEqual({ text: "new", emoji: "" });
+  });
 });
