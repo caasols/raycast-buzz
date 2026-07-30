@@ -430,7 +430,14 @@ function ActionSubmitForm(props: { title: string; onSubmit: (values: FormValues)
 
 function ActionOpen(props: { title: string; target: string; icon?: unknown; shortcut?: unknown }) {
   return (
-    <button data-testid="action" data-title={props.title} data-kind="open" data-target={props.target}>
+    <button
+      data-testid="action"
+      data-title={props.title}
+      data-kind="open"
+      data-target={props.target}
+      data-icon={iconAttr(props.icon)}
+      data-shortcut={shortcutAttr(props.shortcut)}
+    >
       {props.title}
     </button>
   );

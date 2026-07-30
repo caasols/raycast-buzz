@@ -109,6 +109,13 @@ describe("ChannelMessages", () => {
     expect(actions[0]).toHaveAttribute("data-target", "buzz://message?channel=chan-1&id=m1");
   });
 
+  it("gives Open in Buzz an explicit icon, rather than Action.Open's Finder-glyph default", async () => {
+    render(<ChannelMessages client={fakeClient()} channel={CHANNEL} />);
+    await items();
+    const open = screen.getAllByTestId("action").find((b) => b.dataset.title === "Open in Buzz");
+    expect(open).toHaveAttribute("data-icon", "AppWindow");
+  });
+
   it("offers Copy Link carrying the same deep link", async () => {
     render(<ChannelMessages client={fakeClient()} channel={CHANNEL} />);
     await items();
@@ -210,7 +217,7 @@ describe("ChannelMessages react action", () => {
     await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.objectContaining({ message: "socket closed" })));
   });
 
-  it("offers copy actions for the message body and its id", async () => {
+  it("offers copy actions for the deep link, the message body and its id, in that order", async () => {
     render(<ChannelMessages client={fakeClient()} channel={CHANNEL} />);
     await items();
 

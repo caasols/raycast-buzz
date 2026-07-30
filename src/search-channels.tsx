@@ -1,4 +1,4 @@
-import { List, ActionPanel, Action } from "@raycast/api";
+import { List, ActionPanel, Action, Icon } from "@raycast/api";
 import { usePromise } from "@raycast/utils";
 import { getClient } from "./lib/preferences";
 import { ErrorView } from "./components/error-view";
@@ -26,7 +26,9 @@ export default function Command() {
           subtitle={channel.about}
           actions={
             <ActionPanel>
-              <Action.Open title="Open in Buzz" target={buildChannelLink(channel.id)} />
+              {/* channel.id has no native buzz://channel link; buildChannelLink anchors it
+                  to a message that cannot exist, and Buzz falls back to opening the channel. */}
+              <Action.Open title="Open in Buzz" target={buildChannelLink(channel.id)} icon={Icon.AppWindow} />
               {data?.client && (
                 <Action.Push
                   title="Show Messages"

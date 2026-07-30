@@ -1,4 +1,4 @@
-import { List, ActionPanel, Action, showToast, Toast } from "@raycast/api";
+import { List, ActionPanel, Action, Icon, showToast, Toast } from "@raycast/api";
 import { usePromise } from "@raycast/utils";
 import { BuzzClient } from "../lib/buzz-client";
 import { buildMessageLink } from "../lib/buzz-link";
@@ -43,7 +43,7 @@ export function ChannelMessages({ client, channel }: { client: BuzzClient; chann
             accessories={[{ date: new Date(message.createdAt * 1000) }]}
             actions={
               <ActionPanel>
-                <Action.Open title="Open in Buzz" target={link} />
+                <Action.Open title="Open in Buzz" target={link} icon={Icon.AppWindow} />
                 <Action title="React (Like)" onAction={() => like(message.id)} />
                 <Action.CopyToClipboard title="Copy Link" content={link} />
                 <Action.CopyToClipboard title="Copy Message" content={message.content} />

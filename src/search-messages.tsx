@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { List, ActionPanel, Action } from "@raycast/api";
+import { List, ActionPanel, Action, Icon } from "@raycast/api";
 import { usePromise } from "@raycast/utils";
 import { getClient } from "./lib/preferences";
 import { buildMessageLink } from "./lib/buzz-link";
@@ -37,7 +37,7 @@ export default function Command() {
             accessories={[{ date: new Date(message.createdAt * 1000) }]}
             actions={
               <ActionPanel>
-                {link && <Action.Open title="Open in Buzz" target={link} />}
+                {link && <Action.Open title="Open in Buzz" target={link} icon={Icon.AppWindow} />}
                 {link && <Action.CopyToClipboard title="Copy Link" content={link} />}
                 <Action.CopyToClipboard title="Copy Message" content={message.content} />
                 <Action.CopyToClipboard title="Copy Message ID" content={message.id} />
