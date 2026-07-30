@@ -322,7 +322,11 @@ describe("BuzzClient.getMessages thread collapsing", () => {
         ev({ id: `m${i}`, kind: 9, created_at: i, content: "x", tags: [["h", "chan"]] }),
       ),
     );
-    expect(await client.getMessages("chan", 3)).toHaveLength(3);
+    const msgs = await client.getMessages("chan", 3);
+    // Fixture is 10 root messages with ascending created_at (m0..m9), so the
+    // newest three, newest-first, are m9/m8/m7. Asserting only the length would
+    // still pass if the implementation sliced before sorting instead of after.
+    expect(msgs.map((m) => m.id)).toEqual(["m9", "m8", "m7"]);
   });
 
   it("still returns newest first after collapsing", async () => {
