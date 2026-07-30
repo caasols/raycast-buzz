@@ -35,7 +35,7 @@
     {
       "name": "set-status",
       "title": "Set Status",
-      "description": "Set your Buzz user status",
+      "description": "View your current status and apply, create, edit or delete reusable status presets, or set a custom status",
       "mode": "view"
     }
   ],

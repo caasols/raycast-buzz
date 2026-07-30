@@ -16,17 +16,17 @@ Buzz is a self-hostable workspace where humans and agents build together, on a r
 - Full-text search across the channels you can access
 - Post a message to any channel without leaving Raycast
 - React to a message with a NIP-25 like
-- Set your user status, with an optional emoji
+- Set your user status from a list of reusable presets, or type a custom one, with an optional emoji
 - Requests signed locally with NIP-98; your private key never leaves your machine
 
 ## Commands
 
-| Command           | Description                                                       |
-| ----------------- | ----------------------------------------------------------------- |
-| `Search Channels` | Browse channels, open one to read messages, react, or copy its id |
-| `Search Messages` | Full-text search across the channels you can access               |
-| `Send Message`    | Post a message to a channel you pick from a dropdown              |
-| `Set Status`      | Set your user status, with an optional emoji                      |
+| Command           | Description                                                                     |
+| ----------------- | ------------------------------------------------------------------------------- |
+| `Search Channels` | Browse channels, open one to read messages, react, or copy its id               |
+| `Search Messages` | Full-text search across the channels you can access                             |
+| `Send Message`    | Post a message to a channel you pick from a dropdown                            |
+| `Set Status`      | View your current status, apply or manage reusable presets, or set a custom one |
 
 ## Setup
 
