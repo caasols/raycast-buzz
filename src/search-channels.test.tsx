@@ -103,11 +103,41 @@ describe("Search Channels", () => {
     render(<Command />);
     await items();
 
-    const open = screen.getAllByTestId("action").find((b) => b.dataset.title === "Open Channel");
+    const open = screen.getAllByTestId("action").find((b) => b.dataset.title === "Show Messages");
     expect(open).toBeDefined();
     fireEvent.click(open!);
 
     // The pushed view loads that channel's messages.
     await waitFor(() => expect(client.getMessages).toHaveBeenCalledWith("uuid-1"));
+  });
+
+  it("offers Open in Buzz as the first action, using the anchorless channel link", async () => {
+    mocks.getClient.mockReturnValue(fakeClient());
+    render(<Command />);
+    await items();
+    const actions = screen.getAllByTestId("action");
+    expect(actions[0]).toHaveAttribute("data-title", "Open in Buzz");
+    expect(actions[0]).toHaveAttribute("data-target", `buzz://message?channel=uuid-1&id=${"0".repeat(64)}`);
+  });
+
+  it("keeps the in-Raycast drill-in, renamed so it does not compete for the word open", async () => {
+    const client = fakeClient({ getMessages: vi.fn(async () => []) });
+    mocks.getClient.mockReturnValue(client);
+    render(<Command />);
+    await items();
+
+    const show = screen.getAllByTestId("action").find((b) => b.dataset.title === "Show Messages");
+    expect(show).toBeDefined();
+    fireEvent.click(show!);
+    await waitFor(() => expect(client.getMessages).toHaveBeenCalledWith("uuid-1"));
+  });
+
+  it("does not offer Copy Link for a channel", async () => {
+    mocks.getClient.mockReturnValue(fakeClient());
+    render(<Command />);
+    await items();
+    // The channel link carries a sentinel message id: safe to open, but it
+    // would paste into Buzz as a link to a message that does not exist.
+    expect(screen.getAllByTestId("action").map((b) => b.dataset.title)).not.toContain("Copy Link");
   });
 });
