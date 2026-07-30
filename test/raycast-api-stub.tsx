@@ -285,7 +285,15 @@ function FormDropdownItem(props: { value: string; title?: string; keywords?: str
   );
 }
 
-function FormDropdown(props: { id: string; title?: string; children?: ReactNode; defaultValue?: string }) {
+function FormDropdown(props: {
+  id: string;
+  title?: string;
+  children?: ReactNode;
+  defaultValue?: string;
+  placeholder?: string;
+  onSearchTextChange?: (text: string) => void;
+  onChange?: (value: string) => void;
+}) {
   const ctx = useFormContext();
   const values: string[] = [];
   Children.forEach(props.children, (child) => {
@@ -301,14 +309,28 @@ function FormDropdown(props: { id: string; title?: string; children?: ReactNode;
   }, [selected]);
 
   return (
-    <select
-      data-testid={`field-${props.id}`}
-      aria-label={props.title}
-      defaultValue={selected}
-      onChange={(e) => ctx?.setValue(props.id, e.target.value)}
-    >
-      {props.children}
-    </select>
+    <>
+      {/* Raycast's dropdown owns a search field. Supplying onSearchTextChange
+          there turns its native filtering off and hands the query to the
+          extension, so the stub exposes that field as a sibling input rather
+          than nesting it in the select, which would be invalid markup. */}
+      <input
+        data-testid={`field-${props.id}-search`}
+        placeholder={props.placeholder}
+        onChange={(e) => props.onSearchTextChange?.(e.target.value)}
+      />
+      <select
+        data-testid={`field-${props.id}`}
+        aria-label={props.title}
+        defaultValue={selected}
+        onChange={(e) => {
+          ctx?.setValue(props.id, e.target.value);
+          props.onChange?.(e.target.value);
+        }}
+      >
+        {props.children}
+      </select>
+    </>
   );
 }
 

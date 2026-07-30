@@ -1,5 +1,11 @@
+import { useState } from "react";
 import { Form, ActionPanel, Action, showToast, Toast } from "@raycast/api";
-import { EMOJI, emojiSearchTerms } from "../lib/emoji";
+import { emojiSearchTerms, searchEmoji } from "../lib/emoji";
+
+/** The entry for a chosen char, as a 0 or 1 element list, so it can be spread. */
+function pinned(char: string) {
+  return searchEmoji("").filter((entry) => entry.char === char);
+}
 
 /**
  * The one form behind setting a custom status and creating or editing a
@@ -17,6 +23,19 @@ export function StatusForm({
   initialText?: string;
   onSubmit: (values: { emoji: string; text: string }) => Promise<void>;
 }) {
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState(initialEmoji ?? "");
+
+  // Raycast's own dropdown filtering cannot find these entries (see
+  // searchEmoji), so onSearchTextChange takes the query, which implicitly turns
+  // the native filter off, and we render the matches ourselves.
+  const matches = searchEmoji(query);
+  // The chosen emoji stays rendered even when it does not match the query.
+  // Without this, typing after picking one drops it from the children and the
+  // dropdown loses its value, which would silently blank the emoji when editing
+  // an existing preset.
+  const visible = selected && !matches.some((e) => e.char === selected) ? [...matches, ...pinned(selected)] : matches;
+
   async function handleSubmit(values: { emoji: string; text: string }) {
     const emoji = values.emoji.trim();
     const text = values.text.trim();
@@ -35,9 +54,16 @@ export function StatusForm({
         </ActionPanel>
       }
     >
-      <Form.Dropdown id="emoji" title="Emoji" defaultValue={initialEmoji ?? ""}>
+      <Form.Dropdown
+        id="emoji"
+        title="Emoji"
+        defaultValue={initialEmoji ?? ""}
+        placeholder="Search by name or keyword"
+        onSearchTextChange={setQuery}
+        onChange={setSelected}
+      >
         <Form.Dropdown.Item value="" title="None" />
-        {EMOJI.map((entry) => (
+        {visible.map((entry) => (
           <Form.Dropdown.Item
             key={entry.shortcode}
             value={entry.char}

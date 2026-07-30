@@ -146,3 +146,54 @@ export function emojiSearchTerms(entry: EmojiEntry): string[] {
   const name = entry.shortcode.replaceAll(":", "");
   return [...new Set([name, ...name.split("_"), ...entry.keywords.split(" ")])];
 }
+
+/** True when every character of `needle` appears in `haystack`, in order. */
+function isSubsequence(needle: string, haystack: string): boolean {
+  let i = 0;
+  for (const ch of haystack) {
+    if (ch === needle[i]) i += 1;
+    if (i === needle.length) return true;
+  }
+  return i === needle.length;
+}
+
+/**
+ * How well one entry answers a query. 0 means no match at all.
+ *
+ * Ranked rather than boolean so an exact name beats an incidental keyword:
+ * searching "bee" should put :bee: first, not an entry that merely mentions
+ * bees. Ties keep dataset order, which groups the list by category.
+ */
+function scoreEntry(entry: EmojiEntry, query: string): number {
+  let best = 0;
+  for (const term of emojiSearchTerms(entry)) {
+    if (term === query) return 4;
+    if (term.startsWith(query)) best = Math.max(best, 3);
+    else if (term.includes(query)) best = Math.max(best, 2);
+    else if (isSubsequence(query, term)) best = Math.max(best, 1);
+  }
+  return best;
+}
+
+/**
+ * Filter and rank the picker for a query, fuzzily.
+ *
+ * This exists because Raycast's own dropdown filtering cannot do the job:
+ * `Form.Dropdown.Item` declares a `keywords` prop documented as "searched in
+ * addition to the title", but it is not honoured, and the native filter matches
+ * only prefixes of whitespace-separated title tokens. Since the title reads
+ * ":brain:", typing ":brain" matched and typing "brain" did not, and none of the
+ * curated keywords ("lunch", "wfh") worked at all. Setting `onSearchTextChange`
+ * on the dropdown turns the native filter off and lets this run instead.
+ *
+ * Leading and trailing colons are stripped from the query so a habitual
+ * ":brain" still works.
+ */
+export function searchEmoji(query: string): EmojiEntry[] {
+  const q = query.trim().toLowerCase().replaceAll(":", "");
+  if (!q) return [...EMOJI];
+  return EMOJI.map((entry) => ({ entry, score: scoreEntry(entry, q) }))
+    .filter((scored) => scored.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map((scored) => scored.entry);
+}

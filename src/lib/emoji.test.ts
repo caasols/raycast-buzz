@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { EMOJI, emojiSearchTerms } from "./emoji";
+import { EMOJI, emojiSearchTerms, searchEmoji } from "./emoji";
 
 describe("EMOJI dataset", () => {
   it("is a non-trivial curated list", () => {
@@ -70,5 +70,62 @@ describe("emojiSearchTerms", () => {
     for (const entry of EMOJI) {
       expect(emojiSearchTerms(entry).every((t) => t.length > 0)).toBe(true);
     }
+  });
+});
+
+describe("searchEmoji", () => {
+  const shortcodes = (q: string) => searchEmoji(q).map((e) => e.shortcode);
+
+  it("returns everything for an empty or whitespace query", () => {
+    expect(searchEmoji("")).toHaveLength(EMOJI.length);
+    expect(searchEmoji("   ")).toHaveLength(EMOJI.length);
+  });
+
+  it("finds an emoji by its plain name, the case that was broken", () => {
+    expect(shortcodes("brain")).toContain(":brain:");
+  });
+
+  it("still finds it when the user types the colon out of habit", () => {
+    expect(shortcodes(":brain")).toContain(":brain:");
+    expect(shortcodes(":brain:")).toContain(":brain:");
+  });
+
+  it("finds an emoji by a curated keyword, which native filtering never did", () => {
+    expect(shortcodes("lunch")).toContain(":fork_and_knife:");
+    expect(shortcodes("vacation")).toContain(":palm_tree:");
+  });
+
+  it("finds a word from the middle of an underscored name", () => {
+    expect(shortcodes("face")).toContain(":sneezing_face:");
+  });
+
+  it("matches a subsequence, so a fast typist still lands", () => {
+    expect(shortcodes("snzng")).toContain(":sneezing_face:");
+  });
+
+  it("is case insensitive", () => {
+    expect(shortcodes("BRAIN")).toEqual(shortcodes("brain"));
+  });
+
+  it("ranks an exact name above an incidental keyword mention", () => {
+    // :bulb: carries the keyword "brainstorming", which contains "brain".
+    const results = shortcodes("brain");
+    expect(results.indexOf(":brain:")).toBeLessThan(results.indexOf(":bulb:"));
+  });
+
+  it("ranks a prefix match above a mere subsequence", () => {
+    const results = shortcodes("bee");
+    expect(results[0]).toBe(":bee:");
+  });
+
+  it("returns nothing when nothing matches", () => {
+    expect(searchEmoji("zzzzqqqq")).toEqual([]);
+  });
+
+  it("keeps dataset order among equally scored entries", () => {
+    const results = searchEmoji("o");
+    const exact = results.filter((e) => emojiSearchTerms(e).some((t) => t === "o"));
+    const indexes = exact.map((e) => EMOJI.indexOf(e));
+    expect(indexes).toEqual([...indexes].sort((a, b) => a - b));
   });
 });

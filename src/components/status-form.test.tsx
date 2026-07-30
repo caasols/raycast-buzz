@@ -101,4 +101,47 @@ describe("StatusForm", () => {
     // nothing until the shortcode's name became a keyword in its own right.
     expect(brain?.getAttribute("data-keywords")?.split(" ")).toContain("brain");
   });
+  it("filters the dropdown as you type, by plain name", () => {
+    render(<StatusForm submitTitle="Set Status" onSubmit={vi.fn()} />);
+    fireEvent.change(screen.getByTestId("field-emoji-search"), { target: { value: "brain" } });
+    const titles = Array.from(screen.getByTestId("field-emoji").querySelectorAll("option")).map((o) => o.textContent);
+    expect(titles.some((t) => t?.includes(":brain:"))).toBe(true);
+    expect(titles.length).toBeLessThan(EMOJI.length + 1);
+  });
+
+  it("filters by a curated keyword, which Raycast's own filtering never matched", () => {
+    render(<StatusForm submitTitle="Set Status" onSubmit={vi.fn()} />);
+    fireEvent.change(screen.getByTestId("field-emoji-search"), { target: { value: "lunch" } });
+    const titles = Array.from(screen.getByTestId("field-emoji").querySelectorAll("option")).map((o) => o.textContent);
+    expect(titles.some((t) => t?.includes(":fork_and_knife:"))).toBe(true);
+  });
+
+  it("always keeps the None option available while filtering", () => {
+    render(<StatusForm submitTitle="Set Status" onSubmit={vi.fn()} />);
+    fireEvent.change(screen.getByTestId("field-emoji-search"), { target: { value: "brain" } });
+    expect(screen.getByTestId("field-emoji").querySelector("option")).toHaveValue("");
+  });
+
+  it("shows nothing but None when the query matches no emoji", () => {
+    render(<StatusForm submitTitle="Set Status" onSubmit={vi.fn()} />);
+    fireEvent.change(screen.getByTestId("field-emoji-search"), { target: { value: "zzzzqqqq" } });
+    expect(screen.getByTestId("field-emoji").querySelectorAll("option")).toHaveLength(1);
+  });
+
+  it("keeps the chosen emoji rendered even when the query excludes it", () => {
+    render(<StatusForm submitTitle="Set Status" onSubmit={vi.fn()} />);
+    fireEvent.change(screen.getByTestId("field-emoji"), { target: { value: "\u{1F41D}" } });
+    fireEvent.change(screen.getByTestId("field-emoji-search"), { target: { value: "brain" } });
+    // Without this the selection would silently vanish mid-search, blanking the
+    // emoji when editing an existing preset.
+    const values = Array.from(screen.getByTestId("field-emoji").querySelectorAll("option")).map((o) => o.value);
+    expect(values).toContain("\u{1F41D}");
+  });
+
+  it("keeps a prefilled emoji rendered when the query excludes it", () => {
+    render(<StatusForm submitTitle="Save Preset" initialEmoji={"\u{1F41D}"} onSubmit={vi.fn()} />);
+    fireEvent.change(screen.getByTestId("field-emoji-search"), { target: { value: "brain" } });
+    const values = Array.from(screen.getByTestId("field-emoji").querySelectorAll("option")).map((o) => o.value);
+    expect(values).toContain("\u{1F41D}");
+  });
 });
