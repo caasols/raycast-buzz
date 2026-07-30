@@ -14,6 +14,7 @@ Buzz is a self-hostable workspace where humans and agents build together, on a r
 
 - Browse every channel on your relay and drill into its recent messages
 - Full-text search across the channels you can access
+- Open a message or a channel straight in the Buzz app
 - Post a message to any channel without leaving Raycast
 - React to a message with a NIP-25 like
 - Set your user status from a list of reusable presets, or type a custom one, with an optional emoji
@@ -21,12 +22,12 @@ Buzz is a self-hostable workspace where humans and agents build together, on a r
 
 ## Commands
 
-| Command           | Description                                                                     |
-| ----------------- | ------------------------------------------------------------------------------- |
-| `Search Channels` | Browse channels, open one to read messages, react, or copy its id               |
-| `Search Messages` | Full-text search across the channels you can access                             |
-| `Send Message`    | Post a message to a channel you pick from a dropdown                            |
-| `Set Status`      | View your current status, apply or manage reusable presets, or set a custom one |
+| Command           | Description                                                                       |
+| ----------------- | --------------------------------------------------------------------------------- |
+| `Search Channels` | Open a channel in Buzz, drill into its messages to read and react, or copy its id |
+| `Search Messages` | Full-text search across the channels you can access, and open a hit in Buzz       |
+| `Send Message`    | Post a message to a channel you pick from a dropdown                              |
+| `Set Status`      | View your current status, apply or manage reusable presets, or set a custom one   |
 
 ## Setup
 

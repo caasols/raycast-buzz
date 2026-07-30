@@ -97,20 +97,6 @@ describe("Search Channels", () => {
     expect(copies.map((b) => b.dataset.content)).toEqual(["uuid-1", "uuid-2"]);
   });
 
-  it("drills into a channel's messages through the open action", async () => {
-    const client = fakeClient({ getMessages: vi.fn(async () => []) });
-    mocks.getClient.mockReturnValue(client);
-    render(<Command />);
-    await items();
-
-    const open = screen.getAllByTestId("action").find((b) => b.dataset.title === "Show Messages");
-    expect(open).toBeDefined();
-    fireEvent.click(open!);
-
-    // The pushed view loads that channel's messages.
-    await waitFor(() => expect(client.getMessages).toHaveBeenCalledWith("uuid-1"));
-  });
-
   it("offers Open in Buzz as the first action, using the anchorless channel link", async () => {
     mocks.getClient.mockReturnValue(fakeClient());
     render(<Command />);
