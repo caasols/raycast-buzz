@@ -23,6 +23,7 @@ function message(partial: Partial<Message>): Message {
     content: "hello world",
     createdAt: 1700000000,
     channelId: "chan-1",
+    replyCount: 0,
     ...partial,
   };
 }

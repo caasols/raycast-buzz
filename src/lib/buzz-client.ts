@@ -1,6 +1,12 @@
 import { buildNip98Header, getPublicKeyHex, signEvent } from "./nostr";
 import { normalizeRelayUrl } from "./relay-url";
+import { getThreadReference, isThreadReply } from "./threading";
 import type { Channel, Filter, Message, NostrEvent, UserStatus } from "./types";
+
+/** Fetch multiple of the requested limit, since replies are filtered out after the query. */
+const OVER_FETCH = 4;
+/** The relay's documented maximum results per filter. */
+const RELAY_MAX_RESULTS = 500;
 
 export class RelayError extends Error {
   constructor(message: string) {
@@ -28,6 +34,7 @@ function toMessage(event: NostrEvent): Message {
     content: event.content,
     createdAt: event.created_at,
     channelId: tagValue(event, "h") ?? "",
+    replyCount: 0,
   };
 }
 
@@ -83,9 +90,35 @@ export class BuzzClient {
     return events.map(toChannel).filter((channel) => channel.id !== "");
   }
 
+  /**
+   * Recent messages in a channel, collapsed the way Buzz collapses them: thread
+   * replies are hidden and counted against their root instead.
+   *
+   * The filtering is client-side because a Nostr filter cannot express the
+   * absence of a tag, so the relay sends replies regardless. That means asking
+   * for `limit` events can yield far fewer after filtering, hence the
+   * over-fetch. It is a heuristic: a channel that is mostly replies can still
+   * come back short. The alternative is pagination, which the relay's 500
+   * result ceiling limits anyway.
+   */
   async getMessages(channelId: string, limit = 50): Promise<Message[]> {
-    const events = await this.query([{ kinds: [9], "#h": [channelId], limit }]);
-    return events.map(toMessage).sort(newestFirst);
+    const events = await this.query([
+      { kinds: [9], "#h": [channelId], limit: Math.min(limit * OVER_FETCH, RELAY_MAX_RESULTS) },
+    ]);
+
+    const replyCounts = new Map<string, number>();
+    for (const event of events) {
+      const rootId = getThreadReference(event.tags).rootId;
+      if (rootId) {
+        replyCounts.set(rootId, (replyCounts.get(rootId) ?? 0) + 1);
+      }
+    }
+
+    return events
+      .filter((event) => !isThreadReply(event.tags))
+      .map((event) => ({ ...toMessage(event), replyCount: replyCounts.get(event.id) ?? 0 }))
+      .sort(newestFirst)
+      .slice(0, limit);
   }
 
   async searchMessages(q: string, opts?: { limit?: number }): Promise<Message[]> {

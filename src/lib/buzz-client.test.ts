@@ -209,7 +209,7 @@ describe("BuzzClient.listChannels", () => {
 });
 
 describe("BuzzClient.getMessages", () => {
-  it("builds a kind:9 #h filter with limit and returns newest-first", async () => {
+  it("builds a kind:9 #h filter with an over-fetched limit and returns newest-first", async () => {
     const client = new BuzzClient("https://relay.test", SK);
     const qSpy = vi
       .spyOn(client, "query")
@@ -218,16 +218,120 @@ describe("BuzzClient.getMessages", () => {
         ev({ id: "new", pubkey: "b", created_at: 200, kind: 9, tags: [["h", "chan"]], content: "new" }),
       ]);
     const msgs = await client.getMessages("chan", 10);
-    expect(qSpy).toHaveBeenCalledWith([{ kinds: [9], "#h": ["chan"], limit: 10 }]);
+    expect(qSpy).toHaveBeenCalledWith([{ kinds: [9], "#h": ["chan"], limit: 40 }]);
     expect(msgs.map((m) => m.content)).toEqual(["new", "old"]);
-    expect(msgs[0]).toMatchObject({ id: "new", author: "b", channelId: "chan", createdAt: 200 });
+    expect(msgs[0]).toMatchObject({ id: "new", author: "b", channelId: "chan", createdAt: 200, replyCount: 0 });
   });
 
-  it("defaults the limit to 50", async () => {
+  it("defaults the limit to 50, over-fetched", async () => {
     const client = new BuzzClient("https://relay.test", SK);
     const qSpy = vi.spyOn(client, "query").mockResolvedValue([]);
     await client.getMessages("chan");
-    expect(qSpy).toHaveBeenCalledWith([{ kinds: [9], "#h": ["chan"], limit: 50 }]);
+    expect(qSpy).toHaveBeenCalledWith([{ kinds: [9], "#h": ["chan"], limit: 200 }]);
+  });
+});
+
+describe("BuzzClient.getMessages thread collapsing", () => {
+  const ROOT = "a".repeat(64);
+
+  function reply(id: string, rootId: string, extraTags: string[][] = []) {
+    return ev({
+      id,
+      kind: 9,
+      created_at: 50,
+      content: "a reply",
+      tags: [["h", "chan"], ["e", rootId, "", "root"], ["e", rootId, "", "reply"], ...extraTags],
+    });
+  }
+
+  it("hides thread replies and keeps the root", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    vi.spyOn(client, "query").mockResolvedValue([
+      ev({ id: ROOT, kind: 9, created_at: 10, content: "the question", tags: [["h", "chan"]] }),
+      reply("r1", ROOT),
+      reply("r2", ROOT),
+    ]);
+    const msgs = await client.getMessages("chan");
+    expect(msgs.map((m) => m.id)).toEqual([ROOT]);
+  });
+
+  it("counts the hidden replies against their root", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    vi.spyOn(client, "query").mockResolvedValue([
+      ev({ id: ROOT, kind: 9, created_at: 10, content: "the question", tags: [["h", "chan"]] }),
+      reply("r1", ROOT),
+      reply("r2", ROOT),
+    ]);
+    expect((await client.getMessages("chan"))[0].replyCount).toBe(2);
+  });
+
+  it("reports zero replies for a message that has none", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    vi.spyOn(client, "query").mockResolvedValue([
+      ev({ id: ROOT, kind: 9, created_at: 10, content: "alone", tags: [["h", "chan"]] }),
+    ]);
+    expect((await client.getMessages("chan"))[0].replyCount).toBe(0);
+  });
+
+  it("keeps a broadcast reply visible, as Buzz does", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    vi.spyOn(client, "query").mockResolvedValue([
+      ev({ id: ROOT, kind: 9, created_at: 10, content: "the question", tags: [["h", "chan"]] }),
+      reply("b1", ROOT, [["broadcast", "1"]]),
+    ]);
+    const msgs = await client.getMessages("chan");
+    expect(msgs.map((m) => m.id).sort()).toEqual([ROOT, "b1"].sort());
+  });
+
+  it("counts a broadcast reply against its root as well as showing it", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    vi.spyOn(client, "query").mockResolvedValue([
+      ev({ id: ROOT, kind: 9, created_at: 10, content: "the question", tags: [["h", "chan"]] }),
+      reply("b1", ROOT, [["broadcast", "1"]]),
+    ]);
+    const root = (await client.getMessages("chan")).find((m) => m.id === ROOT);
+    expect(root?.replyCount).toBe(1);
+  });
+
+  it("loses the count when the root fell outside the fetched window", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    vi.spyOn(client, "query").mockResolvedValue([reply("r1", "some-root-we-did-not-fetch")]);
+    // The reply is hidden and there is no visible root to attribute it to. This
+    // is accepted rather than papered over.
+    expect(await client.getMessages("chan")).toEqual([]);
+  });
+
+  it("over-fetches so filtering does not empty the list", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    const qSpy = vi.spyOn(client, "query").mockResolvedValue([]);
+    await client.getMessages("chan", 50);
+    expect(qSpy).toHaveBeenCalledWith([{ kinds: [9], "#h": ["chan"], limit: 200 }]);
+  });
+
+  it("never asks for more than the relay's 500 result ceiling", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    const qSpy = vi.spyOn(client, "query").mockResolvedValue([]);
+    await client.getMessages("chan", 400);
+    expect(qSpy.mock.calls[0][0][0].limit).toBe(500);
+  });
+
+  it("trims the collapsed result back to the requested limit", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    vi.spyOn(client, "query").mockResolvedValue(
+      Array.from({ length: 10 }, (_, i) =>
+        ev({ id: `m${i}`, kind: 9, created_at: i, content: "x", tags: [["h", "chan"]] }),
+      ),
+    );
+    expect(await client.getMessages("chan", 3)).toHaveLength(3);
+  });
+
+  it("still returns newest first after collapsing", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    vi.spyOn(client, "query").mockResolvedValue([
+      ev({ id: "old", kind: 9, created_at: 10, content: "old", tags: [["h", "chan"]] }),
+      ev({ id: "new", kind: 9, created_at: 99, content: "new", tags: [["h", "chan"]] }),
+    ]);
+    expect((await client.getMessages("chan")).map((m) => m.id)).toEqual(["new", "old"]);
   });
 });
 

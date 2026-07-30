@@ -37,6 +37,7 @@ export interface Message {
   content: string;
   createdAt: number;
   channelId: string;
+  replyCount: number;
 }
 
 export interface UserStatus {
