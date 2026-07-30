@@ -21,6 +21,11 @@ export function getThreadReference(tags: string[][]): ThreadReference {
   }
   // The eventTags filter above keeps only tags whose second element is a string,
   // so replyTag[1] is always a string here and the ?? null fallback cannot fire.
+  // The pragma below only suppresses coverage for its own line because it sits
+  // mid-line, deliberately: if this is ever reformatted so the comment starts on
+  // its own line, c8 will treat it as covering the next line instead, silently
+  // swallowing that line's branches. That exact failure mode is why two other
+  // pragmas were already removed from this file; do not reformat it.
   const parentId = replyTag[1] ?? /* c8 ignore next */ null;
   return { parentId, rootId: rootTag?.[1] ?? parentId };
 }
