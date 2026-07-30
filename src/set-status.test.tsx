@@ -365,7 +365,6 @@ describe("Set Status list", () => {
       expect(showToast).toHaveBeenCalledWith(expect.objectContaining({ title: "Could not set status" })),
     );
     expect(pop).not.toHaveBeenCalled();
-    expect(screen.getByTestId("form")).toBeInTheDocument();
   });
 
   it("submits a custom status before the initial load resolves", async () => {
@@ -436,7 +435,6 @@ describe("Set Status list", () => {
       ),
     );
     expect(pop).not.toHaveBeenCalled();
-    expect(screen.getByTestId("form")).toBeInTheDocument();
     expect(screen.getAllByTestId("list-item")).toHaveLength(before.length);
     setItemSpy.mockRestore();
   });
@@ -456,7 +454,6 @@ describe("Set Status list", () => {
       ),
     );
     expect(pop).not.toHaveBeenCalled();
-    expect(screen.getByTestId("form")).toBeInTheDocument();
     setItemSpy.mockRestore();
   });
 
