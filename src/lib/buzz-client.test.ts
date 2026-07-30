@@ -217,7 +217,7 @@ describe("BuzzClient.getMessages", () => {
         ev({ id: "old", pubkey: "a", created_at: 100, kind: 9, tags: [["h", "chan"]], content: "old" }),
         ev({ id: "new", pubkey: "b", created_at: 200, kind: 9, tags: [["h", "chan"]], content: "new" }),
       ]);
-    const msgs = await client.getMessages("chan", 10);
+    const { messages: msgs } = await client.getMessages("chan", 10);
     expect(qSpy).toHaveBeenCalledWith([{ kinds: [9], "#h": ["chan"], limit: 40 }]);
     expect(msgs.map((m) => m.content)).toEqual(["new", "old"]);
     expect(msgs[0]).toMatchObject({ id: "new", author: "b", channelId: "chan", createdAt: 200, replyCount: 0 });
@@ -251,7 +251,7 @@ describe("BuzzClient.getMessages thread collapsing", () => {
       reply("r1", ROOT),
       reply("r2", ROOT),
     ]);
-    const msgs = await client.getMessages("chan");
+    const { messages: msgs } = await client.getMessages("chan");
     expect(msgs.map((m) => m.id)).toEqual([ROOT]);
   });
 
@@ -262,7 +262,7 @@ describe("BuzzClient.getMessages thread collapsing", () => {
       reply("r1", ROOT),
       reply("r2", ROOT),
     ]);
-    expect((await client.getMessages("chan"))[0].replyCount).toBe(2);
+    expect((await client.getMessages("chan")).messages[0].replyCount).toBe(2);
   });
 
   it("reports zero replies for a message that has none", async () => {
@@ -270,7 +270,7 @@ describe("BuzzClient.getMessages thread collapsing", () => {
     vi.spyOn(client, "query").mockResolvedValue([
       ev({ id: ROOT, kind: 9, created_at: 10, content: "alone", tags: [["h", "chan"]] }),
     ]);
-    expect((await client.getMessages("chan"))[0].replyCount).toBe(0);
+    expect((await client.getMessages("chan")).messages[0].replyCount).toBe(0);
   });
 
   it("keeps a broadcast reply visible, as Buzz does", async () => {
@@ -279,7 +279,7 @@ describe("BuzzClient.getMessages thread collapsing", () => {
       ev({ id: ROOT, kind: 9, created_at: 10, content: "the question", tags: [["h", "chan"]] }),
       reply("b1", ROOT, [["broadcast", "1"]]),
     ]);
-    const msgs = await client.getMessages("chan");
+    const { messages: msgs } = await client.getMessages("chan");
     expect(msgs.map((m) => m.id).sort()).toEqual([ROOT, "b1"].sort());
   });
 
@@ -289,7 +289,8 @@ describe("BuzzClient.getMessages thread collapsing", () => {
       ev({ id: ROOT, kind: 9, created_at: 10, content: "the question", tags: [["h", "chan"]] }),
       reply("b1", ROOT, [["broadcast", "1"]]),
     ]);
-    const root = (await client.getMessages("chan")).find((m) => m.id === ROOT);
+    const { messages: msgs } = await client.getMessages("chan");
+    const root = msgs.find((m) => m.id === ROOT);
     expect(root?.replyCount).toBe(1);
   });
 
@@ -297,15 +298,30 @@ describe("BuzzClient.getMessages thread collapsing", () => {
     const client = new BuzzClient("https://relay.test", SK);
     vi.spyOn(client, "query").mockResolvedValue([reply("r1", "some-root-we-did-not-fetch")]);
     // The reply is hidden and there is no visible root to attribute it to. This
-    // is accepted rather than papered over.
-    expect(await client.getMessages("chan")).toEqual([]);
+    // is accepted rather than papered over: fetchedCount stays 1 so the caller
+    // can tell "all replies, root out of window" apart from a truly empty channel.
+    expect(await client.getMessages("chan")).toEqual({ messages: [], fetchedCount: 1 });
   });
 
-  it("over-fetches so filtering does not empty the list", async () => {
+  it("reports fetchedCount 0 for a genuinely empty channel", async () => {
     const client = new BuzzClient("https://relay.test", SK);
-    const qSpy = vi.spyOn(client, "query").mockResolvedValue([]);
-    await client.getMessages("chan", 50);
-    expect(qSpy).toHaveBeenCalledWith([{ kinds: [9], "#h": ["chan"], limit: 200 }]);
+    vi.spyOn(client, "query").mockResolvedValue([]);
+    expect(await client.getMessages("chan")).toEqual({ messages: [], fetchedCount: 0 });
+  });
+
+  it("over-fetches so filtering does not empty a channel that is mostly replies", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    // 3 roots plus 12 replies to the first root: a plain (non-over-fetched)
+    // limit of 5 would return only replies to root0, none of which are roots.
+    const events = [
+      ev({ id: "root0", kind: 9, created_at: 100, content: "root0", tags: [["h", "chan"]] }),
+      ev({ id: "root1", kind: 9, created_at: 90, content: "root1", tags: [["h", "chan"]] }),
+      ev({ id: "root2", kind: 9, created_at: 80, content: "root2", tags: [["h", "chan"]] }),
+      ...Array.from({ length: 12 }, (_, i) => reply(`r${i}`, "root0")),
+    ];
+    vi.spyOn(client, "query").mockResolvedValue(events);
+    const { messages: msgs } = await client.getMessages("chan", 5);
+    expect(msgs.map((m) => m.id)).toEqual(["root0", "root1", "root2"]);
   });
 
   it("never asks for more than the relay's 500 result ceiling", async () => {
@@ -322,7 +338,7 @@ describe("BuzzClient.getMessages thread collapsing", () => {
         ev({ id: `m${i}`, kind: 9, created_at: i, content: "x", tags: [["h", "chan"]] }),
       ),
     );
-    const msgs = await client.getMessages("chan", 3);
+    const { messages: msgs } = await client.getMessages("chan", 3);
     // Fixture is 10 root messages with ascending created_at (m0..m9), so the
     // newest three, newest-first, are m9/m8/m7. Asserting only the length would
     // still pass if the implementation sliced before sorting instead of after.
@@ -335,7 +351,7 @@ describe("BuzzClient.getMessages thread collapsing", () => {
       ev({ id: "old", kind: 9, created_at: 10, content: "old", tags: [["h", "chan"]] }),
       ev({ id: "new", kind: 9, created_at: 99, content: "new", tags: [["h", "chan"]] }),
     ]);
-    expect((await client.getMessages("chan")).map((m) => m.id)).toEqual(["new", "old"]);
+    expect((await client.getMessages("chan")).messages.map((m) => m.id)).toEqual(["new", "old"]);
   });
 });
 
@@ -343,7 +359,7 @@ describe("BuzzClient message mapping", () => {
   it("maps a message with no h tag to an empty channel id", async () => {
     const client = new BuzzClient("https://relay.test", SK);
     vi.spyOn(client, "query").mockResolvedValue([ev({ id: "m", pubkey: "a", created_at: 1, kind: 9, content: "x" })]);
-    const msgs = await client.getMessages("chan");
+    const { messages: msgs } = await client.getMessages("chan");
     expect(msgs[0].channelId).toBe("");
   });
 });

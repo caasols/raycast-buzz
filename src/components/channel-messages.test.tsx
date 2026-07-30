@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor, within } from "@testing-library/react";
 import { showToast, Toast } from "@raycast/api";
 import { ChannelMessages } from "./channel-messages";
 import type { BuzzClient } from "../lib/buzz-client";
@@ -25,9 +25,16 @@ function message(partial: Partial<Message>): Message {
   };
 }
 
+// Wraps a message array into the shape BuzzClient.getMessages actually returns.
+// Defaults fetchedCount to messages.length, which is right for every fixture
+// here except the "all replies hidden" case, which passes an explicit count.
+function result(messages: Message[], fetchedCount = messages.length) {
+  return { messages, fetchedCount };
+}
+
 function fakeClient(overrides: Partial<Record<keyof BuzzClient, unknown>> = {}) {
   return {
-    getMessages: vi.fn(async () => [message({})]),
+    getMessages: vi.fn(async () => result([message({})])),
     react: vi.fn(async () => undefined),
     ...overrides,
   } as unknown as BuzzClient;
@@ -50,10 +57,9 @@ describe("ChannelMessages", () => {
 
   it("renders each message with a truncated author as the subtitle", async () => {
     const client = fakeClient({
-      getMessages: vi.fn(async () => [
-        message({ id: "m1", content: "first" }),
-        message({ id: "m2", content: "second" }),
-      ]),
+      getMessages: vi.fn(async () =>
+        result([message({ id: "m1", content: "first" }), message({ id: "m2", content: "second" })]),
+      ),
     });
     render(<ChannelMessages client={client} channel={CHANNEL} />);
     const rendered = await items();
@@ -64,17 +70,45 @@ describe("ChannelMessages", () => {
   });
 
   it("falls back to a placeholder title for an empty message body", async () => {
-    const client = fakeClient({ getMessages: vi.fn(async () => [message({ content: "" })]) });
+    const client = fakeClient({ getMessages: vi.fn(async () => result([message({ content: "" })])) });
     render(<ChannelMessages client={client} channel={CHANNEL} />);
     const rendered = await items();
     expect(rendered[0]).toHaveAttribute("data-title", "(no content)");
   });
 
-  it("shows the empty view when the channel has no messages", async () => {
-    const client = fakeClient({ getMessages: vi.fn(async () => []) });
+  it("shows the empty view when the channel has no messages at all", async () => {
+    const client = fakeClient({ getMessages: vi.fn(async () => result([], 0)) });
     render(<ChannelMessages client={client} channel={CHANNEL} />);
     await waitFor(() => expect(screen.getByTestId("empty-view")).toHaveAttribute("data-title", "No messages"));
+    expect(screen.getByTestId("empty-view")).toHaveAttribute("data-description", "This channel has no messages yet");
     expect(screen.queryAllByTestId("list-item")).toHaveLength(0);
+  });
+
+  it("says the recent messages are all thread replies when the fetched window held events but no visible root", async () => {
+    // 250 replies fetched, none survive filtering because their root fell
+    // outside the window: the channel is not empty, but this drill-in is.
+    const client = fakeClient({ getMessages: vi.fn(async () => result([], 250)) });
+    render(<ChannelMessages client={client} channel={CHANNEL} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("empty-view")).toHaveAttribute("data-title", "Only thread replies here"),
+    );
+    const emptyView = screen.getByTestId("empty-view");
+    expect(emptyView.getAttribute("data-description")).toMatch(/repl/i);
+    expect(emptyView.getAttribute("data-description")).not.toBe("This channel has no messages yet");
+    expect(screen.queryAllByTestId("list-item")).toHaveLength(0);
+  });
+
+  it("keeps Open in Buzz reachable when the fetched window is all thread replies", async () => {
+    const client = fakeClient({ getMessages: vi.fn(async () => result([], 250)) });
+    render(<ChannelMessages client={client} channel={CHANNEL} />);
+    const emptyView = await waitFor(() => screen.getByTestId("empty-view"));
+    const open = within(emptyView)
+      .getAllByTestId("action")
+      .find((b) => b.dataset.title === "Open in Buzz");
+    expect(open).toBeDefined();
+    // Anchored to a message id that cannot exist; Buzz falls back to opening
+    // the channel itself, per buildChannelLink.
+    expect(open).toHaveAttribute("data-target", `buzz://message?channel=chan-1&id=${"0".repeat(64)}`);
   });
 
   it("titles the view with the channel name", async () => {
@@ -125,7 +159,7 @@ describe("ChannelMessages", () => {
   });
 
   it("falls back to the channel being viewed when the message carries no channel id", async () => {
-    const client = fakeClient({ getMessages: vi.fn(async () => [message({ channelId: "" })]) });
+    const client = fakeClient({ getMessages: vi.fn(async () => result([message({ channelId: "" })])) });
     render(<ChannelMessages client={client} channel={CHANNEL} />);
     await items();
     const open = screen.getAllByTestId("action").find((b) => b.dataset.title === "Open in Buzz");
@@ -227,23 +261,40 @@ describe("ChannelMessages react action", () => {
   });
 
   it("shows a reply count when a message has replies", async () => {
-    const client = fakeClient({ getMessages: vi.fn(async () => [message({ replyCount: 6 })]) });
+    const client = fakeClient({ getMessages: vi.fn(async () => result([message({ replyCount: 6 })])) });
     render(<ChannelMessages client={client} channel={CHANNEL} />);
     const rendered = await items();
     expect(rendered[0]).toHaveAttribute("data-accessories", expect.stringContaining("6 replies"));
   });
 
   it("uses the singular for exactly one reply", async () => {
-    const client = fakeClient({ getMessages: vi.fn(async () => [message({ replyCount: 1 })]) });
+    const client = fakeClient({ getMessages: vi.fn(async () => result([message({ replyCount: 1 })])) });
     render(<ChannelMessages client={client} channel={CHANNEL} />);
     const rendered = await items();
     expect(rendered[0]).toHaveAttribute("data-accessories", expect.stringContaining("1 reply"));
   });
 
-  it("shows no reply accessory when there are none", async () => {
-    const client = fakeClient({ getMessages: vi.fn(async () => [message({ replyCount: 0 })]) });
+  it("shows no reply accessory when there are none, while still showing the timestamp", async () => {
+    const client = fakeClient({
+      getMessages: vi.fn(async () => result([message({ replyCount: 0, createdAt: 1700000000 })])),
+    });
     render(<ChannelMessages client={client} channel={CHANNEL} />);
     const rendered = await items();
-    expect(rendered[0].getAttribute("data-accessories") ?? "").not.toContain("repl");
+    const accessories = rendered[0].getAttribute("data-accessories") ?? "";
+    expect(accessories).not.toContain("repl");
+    expect(accessories).toContain(new Date(1700000000 * 1000).toISOString());
+  });
+
+  it("puts the reply count accessory before the timestamp accessory", async () => {
+    const client = fakeClient({
+      getMessages: vi.fn(async () => result([message({ replyCount: 3, createdAt: 1700000000 })])),
+    });
+    render(<ChannelMessages client={client} channel={CHANNEL} />);
+    const rendered = await items();
+    const accessories = rendered[0].getAttribute("data-accessories") ?? "";
+    const countIndex = accessories.indexOf("3 replies");
+    const dateIndex = accessories.indexOf(new Date(1700000000 * 1000).toISOString());
+    expect(countIndex).toBeGreaterThanOrEqual(0);
+    expect(dateIndex).toBeGreaterThan(countIndex);
   });
 });

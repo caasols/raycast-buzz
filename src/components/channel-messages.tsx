@@ -1,7 +1,7 @@
 import { List, ActionPanel, Action, Icon, showToast, Toast } from "@raycast/api";
 import { usePromise } from "@raycast/utils";
 import { BuzzClient } from "../lib/buzz-client";
-import { buildMessageLink } from "../lib/buzz-link";
+import { buildChannelLink, buildMessageLink } from "../lib/buzz-link";
 import { Channel } from "../lib/types";
 import { ErrorView } from "./error-view";
 
@@ -11,6 +11,13 @@ export function ChannelMessages({ client, channel }: { client: BuzzClient; chann
   if (error) {
     return <ErrorView error={error} />;
   }
+
+  const messages = data?.messages ?? [];
+  // The fetched window can be entirely thread replies whose root fell outside
+  // it: `messages` comes back empty even though the channel is not empty.
+  // `fetchedCount` (raw relay events, before filtering) is what tells that
+  // case apart from a genuinely empty channel, where it is 0 too.
+  const allRepliesHidden = messages.length === 0 && (data?.fetchedCount ?? 0) > 0;
 
   async function like(msgId: string) {
     try {
@@ -29,8 +36,20 @@ export function ChannelMessages({ client, channel }: { client: BuzzClient; chann
 
   return (
     <List isLoading={isLoading} navigationTitle={channel.name || channel.id}>
-      <List.EmptyView title="No messages" description="This channel has no messages yet" />
-      {(data ?? []).map((message) => {
+      {allRepliesHidden ? (
+        <List.EmptyView
+          title="Only thread replies here"
+          description="The most recent messages in this channel are all replies to older threads. Open it in Buzz to see them."
+          actions={
+            <ActionPanel>
+              <Action.Open title="Open in Buzz" target={buildChannelLink(channel.id)} icon={Icon.AppWindow} />
+            </ActionPanel>
+          }
+        />
+      ) : (
+        <List.EmptyView title="No messages" description="This channel has no messages yet" />
+      )}
+      {messages.map((message) => {
         // The h tag is authoritative, but inside a channel we already know
         // which one we are viewing, so a message that lost its tag is still
         // linkable rather than losing its actions.

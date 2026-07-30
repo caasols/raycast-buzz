@@ -98,10 +98,14 @@ export class BuzzClient {
    * absence of a tag, so the relay sends replies regardless. That means asking
    * for `limit` events can yield far fewer after filtering, hence the
    * over-fetch. It is a heuristic: a channel that is mostly replies can still
-   * come back short. The alternative is pagination, which the relay's 500
-   * result ceiling limits anyway.
+   * come back short, even to zero: a channel whose fetched window is entirely
+   * replies to roots outside that window collapses to an empty `messages` array
+   * even though the channel is not empty. `fetchedCount` (the relay's raw event
+   * count before filtering) is what lets a caller tell that case apart from a
+   * truly empty channel, where `fetchedCount` is 0 too. The alternative to the
+   * heuristic is pagination, which the relay's 500 result ceiling limits anyway.
    */
-  async getMessages(channelId: string, limit = 50): Promise<Message[]> {
+  async getMessages(channelId: string, limit = 50): Promise<{ messages: Message[]; fetchedCount: number }> {
     const events = await this.query([
       { kinds: [9], "#h": [channelId], limit: Math.min(limit * OVER_FETCH, RELAY_MAX_RESULTS) },
     ]);
@@ -109,16 +113,18 @@ export class BuzzClient {
     const replyCounts = new Map<string, number>();
     for (const event of events) {
       const rootId = getThreadReference(event.tags).rootId;
-      if (rootId) {
+      if (rootId !== null) {
         replyCounts.set(rootId, (replyCounts.get(rootId) ?? 0) + 1);
       }
     }
 
-    return events
+    const messages = events
       .filter((event) => !isThreadReply(event.tags))
       .map((event) => ({ ...toMessage(event), replyCount: replyCounts.get(event.id) ?? 0 }))
       .sort(newestFirst)
       .slice(0, limit);
+
+    return { messages, fetchedCount: events.length };
   }
 
   async searchMessages(q: string, opts?: { limit?: number }): Promise<Message[]> {
