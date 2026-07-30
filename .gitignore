@@ -1,5 +1,11 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
+# secrets: this extension is driven by BUZZ_PRIVATE_KEY, so never let an env
+# file reach the public repo
+.env
+.env.*
+!.env.example
+
 # dependencies
 /node_modules
 
@@ -18,6 +24,20 @@ docs/
 PROJECT_BRIEF.md
 CLAUDE.md
 context.md
+
+# build output
+dist/
+build/
+*.tsbuildinfo
+
+# logs
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# editor
+.vscode/
+.idea/
 
 # misc
 .DS_Store
