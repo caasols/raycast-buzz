@@ -74,7 +74,7 @@ npm run lint
 npm run build
 ```
 
-There is also an end-to-end smoke test that runs against a real relay. It lists channels, posts a marker message, reads it back, and reacts to it, so point it at a workspace where that is acceptable:
+There is also an end-to-end smoke test that runs against a real relay. It lists channels, posts a marker message, reads it back, reacts to it, and round-trips a status (with an emoji) through set/get/clear, so point it at a workspace where that is acceptable:
 
 ```bash
 BUZZ_RELAY_URL=https://relay.example.com BUZZ_PRIVATE_KEY=nsec1... npm run smoke
