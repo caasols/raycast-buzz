@@ -53,9 +53,14 @@ export const useNavigation = () => ({ push, pop });
 export const Icon = new Proxy({}, { get: (_t, name) => String(name) }) as Record<string, string>;
 export const Color = new Proxy({}, { get: (_t, name) => String(name) }) as Record<string, string>;
 
-// A trimmed stand-in for the real `Keyboard.Shortcut.Common` table (values
-// taken from @raycast/api's own type declarations). Extend with more entries
-// if a command starts using them; only New/Edit are needed today.
+// A trimmed stand-in for the real `Keyboard.Shortcut.Common` table. The
+// package's .d.ts only declares the shape (no values) and ships no runtime
+// JS to read them from, so these values are taken from Raycast's own
+// documentation instead. Consequence: the `Common.*` assertions in
+// src/set-status.test.tsx verify this stub's table, not the command's actual
+// choice of shortcut, since the "real" values here are simply what we typed
+// in based on the docs. Extend with more entries if a command starts using
+// them; only New/Edit are needed today.
 export const Keyboard = {
   Shortcut: {
     Common: {
