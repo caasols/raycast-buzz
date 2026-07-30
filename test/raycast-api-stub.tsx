@@ -17,7 +17,7 @@
  * Side-effecting APIs (`showToast`, `popToRoot`, ...) are `vi.fn()` mocks that
  * tests import straight from "@raycast/api" and assert against.
  */
-import { Children, createContext, isValidElement, useContext, useEffect, useState } from "react";
+import { Children, cloneElement, createContext, isValidElement, useContext, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { vi } from "vitest";
 
@@ -35,7 +35,11 @@ export const Toast = {
 
 export const LaunchType = { UserInitiated: "userInitiated", Background: "background" };
 
-export const useNavigation = () => ({ push: vi.fn(), pop: vi.fn() });
+// A stable, module-level pair rather than one minted per call, so tests can
+// import `pop`/`push` directly and assert on them the same way they do `showToast`.
+export const push = vi.fn();
+export const pop = vi.fn();
+export const useNavigation = () => ({ push, pop });
 
 export const Icon = new Proxy({}, { get: (_t, name) => String(name) }) as Record<string, string>;
 export const Color = new Proxy({}, { get: (_t, name) => String(name) }) as Record<string, string>;
@@ -88,6 +92,21 @@ function useFormContext() {
   return useContext(FormContext);
 }
 
+/* ------------------------------------------------------------------ shared */
+
+// Renders any icon/shortcut prop as a plain string attribute so tests can
+// assert on them without caring whether the value is a raw emoji or one of
+// the `Icon.X` proxy strings.
+function iconAttr(icon: unknown): string | undefined {
+  return icon === undefined || icon === null ? undefined : String(icon);
+}
+
+function shortcutAttr(shortcut: unknown): string | undefined {
+  if (!shortcut || typeof shortcut !== "object") return undefined;
+  const { modifiers, key } = shortcut as { modifiers?: string[]; key?: string };
+  return [...(modifiers ?? []), key].filter(Boolean).join("+");
+}
+
 /* --------------------------------------------------------------------- List */
 
 function ListItem(props: {
@@ -96,17 +115,29 @@ function ListItem(props: {
   actions?: ReactNode;
   accessories?: unknown;
   icon?: unknown;
+  section?: string;
 }) {
   return (
-    <div data-testid="list-item" data-title={props.title} data-subtitle={props.subtitle}>
+    <div
+      data-testid="list-item"
+      data-title={props.title}
+      data-subtitle={props.subtitle}
+      data-icon={iconAttr(props.icon)}
+      data-section={props.section}
+    >
       {props.actions}
     </div>
   );
 }
 
-function ListEmptyView(props: { title?: string; description?: string; actions?: ReactNode }) {
+function ListEmptyView(props: { title?: string; description?: string; actions?: ReactNode; section?: string }) {
   return (
-    <div data-testid="empty-view" data-title={props.title} data-description={props.description}>
+    <div
+      data-testid="empty-view"
+      data-title={props.title}
+      data-description={props.description}
+      data-section={props.section}
+    >
       {props.actions}
     </div>
   );
@@ -131,12 +162,21 @@ export function List(props: {
   const items: ReactNode[] = [];
   const emptyViews: ReactNode[] = [];
 
-  const collect = (nodes: ReactNode) => {
+  // Recurses one level into `List.Section`, tagging each collected child with
+  // its enclosing section's title (as a `section` prop `ListItem`/`ListEmptyView`
+  // render into `data-section`) so tests can assert section structure that
+  // would otherwise be invisible once children are flattened.
+  const collect = (nodes: ReactNode, section?: string) => {
     Children.forEach(nodes, (child) => {
       if (!isValidElement(child)) return;
-      if (child.type === ListEmptyView) emptyViews.push(child);
-      else if (child.type === ListSection) collect((child.props as { children?: ReactNode }).children);
-      else items.push(child);
+      if (child.type === ListEmptyView) {
+        emptyViews.push(section ? cloneElement(child, { section } as Record<string, unknown>) : child);
+      } else if (child.type === ListSection) {
+        const sectionProps = child.props as { children?: ReactNode; title?: string };
+        collect(sectionProps.children, sectionProps.title);
+      } else {
+        items.push(section ? cloneElement(child, { section } as Record<string, unknown>) : child);
+      }
     });
   };
   collect(props.children);
@@ -262,17 +302,30 @@ ActionPanel.Section = (props: { children?: ReactNode; title?: string }) => (
 
 export function Action(props: { title: string; onAction?: () => void; icon?: unknown; shortcut?: unknown }) {
   return (
-    <button data-testid="action" data-title={props.title} onClick={() => props.onAction?.()}>
+    <button
+      data-testid="action"
+      data-title={props.title}
+      data-icon={iconAttr(props.icon)}
+      data-shortcut={shortcutAttr(props.shortcut)}
+      onClick={() => props.onAction?.()}
+    >
       {props.title}
     </button>
   );
 }
 
-function ActionPush(props: { title: string; target: ReactNode; icon?: unknown }) {
+function ActionPush(props: { title: string; target: ReactNode; icon?: unknown; shortcut?: unknown }) {
   const [pushed, setPushed] = useState(false);
   if (pushed) return <div data-testid="pushed-view">{props.target}</div>;
   return (
-    <button data-testid="action" data-title={props.title} data-kind="push" onClick={() => setPushed(true)}>
+    <button
+      data-testid="action"
+      data-title={props.title}
+      data-kind="push"
+      data-icon={iconAttr(props.icon)}
+      data-shortcut={shortcutAttr(props.shortcut)}
+      onClick={() => setPushed(true)}
+    >
       {props.title}
     </button>
   );
