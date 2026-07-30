@@ -19,7 +19,8 @@ export function getThreadReference(tags: string[][]): ThreadReference {
   if (!replyTag) {
     return { parentId: null, rootId: null };
   }
-  // replyTag[1] is always a string due to filter on line 13, so ?? null is unreachable
+  // The eventTags filter above keeps only tags whose second element is a string,
+  // so replyTag[1] is always a string here and the ?? null fallback cannot fire.
   const parentId = replyTag[1] ?? /* c8 ignore next */ null;
   return { parentId, rootId: rootTag?.[1] ?? parentId };
 }
