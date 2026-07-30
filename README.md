@@ -8,7 +8,7 @@ Browse channels, search messages, post, react, and set your status in [Buzz](htt
 
 ![Buzz for Raycast Screenshot](./metadata/buzz-1.png)
 
-Buzz is a self-hostable workspace where humans and agents build together, on a relay you own. It is architecturally a Nostr relay, so every action is a cryptographically signed event. This extension signs each request locally and talks to your relay over its authenticated HTTP bridge, so it needs no CLI or other binary installed.
+Buzz is a self-hostable workspace where humans and agents build together, on a relay you own. It is architecturally a Nostr relay, so every action is a cryptographically signed event. This extension signs each request locally and talks to your relay over its authenticated HTTP bridge, so it needs no CLI or other binary installed to reach the relay. Opening a message or channel in the Buzz app, naturally, does require the Buzz desktop app to be installed.
 
 ## Features
 
