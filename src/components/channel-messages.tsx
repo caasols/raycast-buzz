@@ -40,7 +40,12 @@ export function ChannelMessages({ client, channel }: { client: BuzzClient; chann
             key={message.id}
             title={message.content || "(no content)"}
             subtitle={message.author.slice(0, 8)}
-            accessories={[{ date: new Date(message.createdAt * 1000) }]}
+            accessories={[
+              ...(message.replyCount > 0
+                ? [{ text: message.replyCount === 1 ? "1 reply" : `${message.replyCount} replies` }]
+                : []),
+              { date: new Date(message.createdAt * 1000) },
+            ]}
             actions={
               <ActionPanel>
                 <Action.Open title="Open in Buzz" target={link} icon={Icon.AppWindow} />

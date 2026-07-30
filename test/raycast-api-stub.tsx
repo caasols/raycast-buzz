@@ -153,7 +153,7 @@ function ListItem(props: {
   title?: string;
   subtitle?: string;
   actions?: ReactNode;
-  accessories?: unknown;
+  accessories?: { text?: string; date?: Date }[];
   icon?: unknown;
   section?: string;
 }) {
@@ -164,6 +164,7 @@ function ListItem(props: {
       data-subtitle={props.subtitle}
       data-icon={iconAttr(props.icon)}
       data-section={props.section}
+      data-accessories={props.accessories?.map((a) => a.text ?? "").join(" ")}
     >
       {props.actions}
     </div>

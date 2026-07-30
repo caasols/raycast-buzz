@@ -22,12 +22,12 @@ Buzz is a self-hostable workspace where humans and agents build together, on a r
 
 ## Commands
 
-| Command           | Description                                                                       |
-| ----------------- | --------------------------------------------------------------------------------- |
-| `Search Channels` | Open a channel in Buzz, drill into its messages to read and react, or copy its id |
-| `Search Messages` | Full-text search across the channels you can access, and open a hit in Buzz       |
-| `Send Message`    | Post a message to a channel you pick from a dropdown                              |
-| `Set Status`      | View your current status, apply or manage reusable presets, or set a custom one   |
+| Command           | Description                                                                                                                                                 |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Search Channels` | Open a channel in Buzz, drill into its messages (root messages only, each showing its reply count, matching the Buzz app) to read and react, or copy its id |
+| `Search Messages` | Full-text search across the channels you can access, and open a hit in Buzz                                                                                 |
+| `Send Message`    | Post a message to a channel you pick from a dropdown                                                                                                        |
+| `Set Status`      | View your current status, apply or manage reusable presets, or set a custom one                                                                             |
 
 ## Setup
 

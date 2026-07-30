@@ -225,4 +225,25 @@ describe("ChannelMessages react action", () => {
     const copies = screen.getAllByTestId("action").filter((b) => b.dataset.kind === "copy");
     expect(copies.map((b) => b.dataset.content)).toEqual(["buzz://message?channel=chan-1&id=m1", "hello", "m1"]);
   });
+
+  it("shows a reply count when a message has replies", async () => {
+    const client = fakeClient({ getMessages: vi.fn(async () => [message({ replyCount: 6 })]) });
+    render(<ChannelMessages client={client} channel={CHANNEL} />);
+    const rendered = await items();
+    expect(rendered[0]).toHaveAttribute("data-accessories", expect.stringContaining("6 replies"));
+  });
+
+  it("uses the singular for exactly one reply", async () => {
+    const client = fakeClient({ getMessages: vi.fn(async () => [message({ replyCount: 1 })]) });
+    render(<ChannelMessages client={client} channel={CHANNEL} />);
+    const rendered = await items();
+    expect(rendered[0]).toHaveAttribute("data-accessories", expect.stringContaining("1 reply"));
+  });
+
+  it("shows no reply accessory when there are none", async () => {
+    const client = fakeClient({ getMessages: vi.fn(async () => [message({ replyCount: 0 })]) });
+    render(<ChannelMessages client={client} channel={CHANNEL} />);
+    const rendered = await items();
+    expect(rendered[0].getAttribute("data-accessories") ?? "").not.toContain("repl");
+  });
 });
