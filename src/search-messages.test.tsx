@@ -114,4 +114,49 @@ describe("Search Messages", () => {
       ),
     );
   });
+
+  it("offers an Open in Buzz action targeting the message's deep link", async () => {
+    mocks.getClient.mockReturnValue(fakeClient());
+    render(<Command />);
+    type("hello");
+    await waitFor(() => expect(screen.getAllByTestId("list-item").length).toBeGreaterThan(0));
+
+    const open = screen.getAllByTestId("action").find((b) => b.dataset.title === "Open in Buzz");
+    expect(open).toBeDefined();
+    expect(open).toHaveAttribute("data-target", "buzz://message?channel=chan-1&id=m1");
+  });
+
+  it("offers Copy Link carrying the same deep link", async () => {
+    mocks.getClient.mockReturnValue(fakeClient());
+    render(<Command />);
+    type("hello");
+    await waitFor(() => expect(screen.getAllByTestId("list-item").length).toBeGreaterThan(0));
+
+    const copy = screen.getAllByTestId("action").find((b) => b.dataset.title === "Copy Link");
+    expect(copy).toHaveAttribute("data-content", "buzz://message?channel=chan-1&id=m1");
+  });
+
+  it("still offers the plain copy actions", async () => {
+    mocks.getClient.mockReturnValue(fakeClient());
+    render(<Command />);
+    type("hello");
+    await waitFor(() => expect(screen.getAllByTestId("list-item").length).toBeGreaterThan(0));
+
+    const titles = screen.getAllByTestId("action").map((b) => b.dataset.title);
+    expect(titles).toContain("Copy Message");
+    expect(titles).toContain("Copy Message ID");
+  });
+
+  it("omits the link actions for a message that carries no channel id", async () => {
+    mocks.getClient.mockReturnValue(fakeClient({ searchMessages: vi.fn(async () => [message({ channelId: "" })]) }));
+    render(<Command />);
+    type("hello");
+    await waitFor(() => expect(screen.getAllByTestId("list-item").length).toBeGreaterThan(0));
+
+    const titles = screen.getAllByTestId("action").map((b) => b.dataset.title);
+    expect(titles).not.toContain("Open in Buzz");
+    expect(titles).not.toContain("Copy Link");
+    // The message itself is still copyable, so the row is never a dead end.
+    expect(titles).toContain("Copy Message");
+  });
 });

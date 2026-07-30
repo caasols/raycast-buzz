@@ -406,9 +406,18 @@ function ActionSubmitForm(props: { title: string; onSubmit: (values: FormValues)
   );
 }
 
+function ActionOpen(props: { title: string; target: string; icon?: unknown; shortcut?: unknown }) {
+  return (
+    <button data-testid="action" data-title={props.title} data-kind="open" data-target={props.target}>
+      {props.title}
+    </button>
+  );
+}
+
 Action.Push = ActionPush;
 Action.CopyToClipboard = ActionCopyToClipboard;
 Action.SubmitForm = ActionSubmitForm;
 Action.OpenInBrowser = (props: { title?: string; url: string }) => (
   <button data-testid="action" data-title={props.title} data-kind="open-in-browser" data-url={props.url} />
 );
+Action.Open = ActionOpen;
