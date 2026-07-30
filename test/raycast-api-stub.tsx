@@ -170,6 +170,7 @@ function FormTextField(props: { id: string; title?: string; placeholder?: string
       data-testid={`field-${props.id}`}
       aria-label={props.title}
       placeholder={props.placeholder}
+      defaultValue={props.defaultValue}
       onChange={(e) => ctx?.setValue(props.id, e.target.value)}
     />
   );
