@@ -123,9 +123,8 @@ describe("searchEmoji", () => {
   });
 
   it("keeps dataset order among equally scored entries", () => {
-    const results = searchEmoji("o");
-    const exact = results.filter((e) => emojiSearchTerms(e).some((t) => t === "o"));
-    const indexes = exact.map((e) => EMOJI.indexOf(e));
-    expect(indexes).toEqual([...indexes].sort((a, b) => a - b));
+    // "holiday" is a keyword on exactly these five entries, so they all score
+    // 4 (an exact term match) and the tie has to fall back to dataset order.
+    expect(shortcodes("holiday")).toEqual([":beach_with_umbrella:", ":palm_tree:", ":camping:", ":ski:", ":ocean:"]);
   });
 });

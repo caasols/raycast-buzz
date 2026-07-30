@@ -154,7 +154,7 @@ function isSubsequence(needle: string, haystack: string): boolean {
     if (ch === needle[i]) i += 1;
     if (i === needle.length) return true;
   }
-  return i === needle.length;
+  return false;
 }
 
 /**
@@ -186,8 +186,8 @@ function scoreEntry(entry: EmojiEntry, query: string): number {
  * curated keywords ("lunch", "wfh") worked at all. Setting `onSearchTextChange`
  * on the dropdown turns the native filter off and lets this run instead.
  *
- * Leading and trailing colons are stripped from the query so a habitual
- * ":brain" still works.
+ * Every colon is stripped from the query (not just a leading or trailing one),
+ * so a habitual ":brain" still works, and so does something like "wo:rk".
  */
 export function searchEmoji(query: string): EmojiEntry[] {
   const q = query.trim().toLowerCase().replaceAll(":", "");
