@@ -1,16 +1,19 @@
 import { BuzzClient } from "../src/lib/buzz-client";
 import { parseSecretKey } from "../src/lib/nostr";
 
-const relayUrl = process.env.BUZZ_RELAY_URL;
-const privateKey = process.env.BUZZ_PRIVATE_KEY;
+const envRelayUrl = process.env.BUZZ_RELAY_URL;
+const envPrivateKey = process.env.BUZZ_PRIVATE_KEY;
 
-if (!relayUrl || !privateKey) {
+if (!envRelayUrl || !envPrivateKey) {
   process.stderr.write(
     "Smoke test requires BUZZ_RELAY_URL and BUZZ_PRIVATE_KEY environment variables.\n" +
       "Example: BUZZ_RELAY_URL=https://relay.example.com BUZZ_PRIVATE_KEY=nsec1... npm run smoke\n",
   );
   process.exit(1);
 }
+
+const relayUrl: string = envRelayUrl;
+const privateKey: string = envPrivateKey;
 
 async function main() {
   try {
@@ -32,7 +35,7 @@ async function main() {
       console.log(`Message sent with marker: ${marker}`);
 
       console.log("Reading messages back...");
-      const messages = await client.getMessages(channelId, 50);
+      const { messages } = await client.getMessages(channelId, 50);
       const marked = messages.find((msg) => msg.content === marker);
 
       if (marked) {

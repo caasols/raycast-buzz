@@ -24,7 +24,7 @@ const CHANNELS: Channel[] = [
 function fakeClient(overrides: Record<string, unknown> = {}) {
   return {
     listChannels: vi.fn(async () => CHANNELS),
-    getMessages: vi.fn(async () => []),
+    getMessages: vi.fn(async () => ({ messages: [], fetchedCount: 0 })),
     ...overrides,
   };
 }
@@ -107,7 +107,7 @@ describe("Search Channels", () => {
   });
 
   it("keeps the in-Raycast drill-in, renamed so it does not compete for the word open", async () => {
-    const client = fakeClient({ getMessages: vi.fn(async () => []) });
+    const client = fakeClient({ getMessages: vi.fn(async () => ({ messages: [], fetchedCount: 0 })) });
     mocks.getClient.mockReturnValue(client);
     render(<Command />);
     await items();
