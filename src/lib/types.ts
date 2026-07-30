@@ -37,6 +37,12 @@ export interface Message {
   content: string;
   createdAt: number;
   channelId: string;
+  /**
+   * Count of thread replies collapsed into this message. Only meaningful for
+   * messages returned by `BuzzClient.getMessages`, which does the collapsing;
+   * `searchMessages` results always report 0 here, whether or not the message
+   * actually has replies, because search does not do thread collapsing.
+   */
   replyCount: number;
 }
 
