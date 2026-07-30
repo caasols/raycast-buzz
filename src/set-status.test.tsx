@@ -3,7 +3,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
-import { showToast, Toast, LocalStorage } from "@raycast/api";
+import { showToast, Toast, LocalStorage, confirmAlert, Alert } from "@raycast/api";
 // `__resetLocalStorage` and `pop` are stub-only test helpers that the real
 // @raycast/api package does not declare, so they are imported by relative
 // path rather than through the "@raycast/api" specifier (which vitest
@@ -216,12 +216,38 @@ describe("Set Status list", () => {
     await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.objectContaining({ message: "socket closed" })));
   });
 
-  it("deletes a preset", async () => {
+  it("asks for confirmation, with destructive styling, before deleting a preset", async () => {
+    mocks.getClient.mockReturnValue(fakeClient());
+    render(<Command />);
+    await items();
+    const seeded = await listPresets();
+    fireEvent.click(action("Delete Preset")!);
+    await waitFor(() =>
+      expect(confirmAlert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringContaining(seeded[0].text),
+          primaryAction: expect.objectContaining({ style: Alert.ActionStyle.Destructive }),
+        }),
+      ),
+    );
+  });
+
+  it("deletes a preset once its deletion is confirmed", async () => {
     mocks.getClient.mockReturnValue(fakeClient());
     render(<Command />);
     const before = await items();
     fireEvent.click(action("Delete Preset")!);
     await waitFor(() => expect(screen.getAllByTestId("list-item")).toHaveLength(before.length - 1));
+  });
+
+  it("keeps a preset when its deletion is cancelled", async () => {
+    mocks.getClient.mockReturnValue(fakeClient());
+    render(<Command />);
+    const before = await items();
+    vi.mocked(confirmAlert).mockResolvedValueOnce(false);
+    fireEvent.click(action("Delete Preset")!);
+    await waitFor(() => expect(confirmAlert).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getAllByTestId("list-item")).toHaveLength(before.length));
   });
 
   it("reports a failed preset deletion instead of silently doing nothing", async () => {

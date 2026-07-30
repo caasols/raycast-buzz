@@ -29,6 +29,15 @@ export const openExtensionPreferences = vi.fn(async () => undefined);
 export const showHUD = vi.fn(async () => undefined);
 export const getPreferenceValues = vi.fn(() => ({}) as never);
 
+// Resolves `true` by default so a command that gates a destructive action
+// behind `confirmAlert` keeps working in tests that don't care about the
+// prompt; a test asserting the cancel path overrides this per-call.
+export const confirmAlert = vi.fn(async (_options?: unknown) => true);
+
+export const Alert = {
+  ActionStyle: { Default: "default", Cancel: "cancel", Destructive: "destructive" },
+};
+
 export const Toast = {
   Style: { Success: "success", Failure: "failure", Animated: "animated" },
 };

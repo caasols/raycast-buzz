@@ -1,4 +1,15 @@
-import { List, ActionPanel, Action, Icon, showToast, Toast, useNavigation, Keyboard } from "@raycast/api";
+import {
+  List,
+  ActionPanel,
+  Action,
+  Icon,
+  showToast,
+  Toast,
+  useNavigation,
+  Keyboard,
+  confirmAlert,
+  Alert,
+} from "@raycast/api";
 import { usePromise } from "@raycast/utils";
 import { getClient } from "./lib/preferences";
 import { ErrorView } from "./components/error-view";
@@ -64,6 +75,18 @@ export default function Command() {
       return;
     }
     revalidate();
+  }
+
+  // Presets are user-typed data with no undo and the seeded flag guarantees a
+  // deleted preset never comes back, so this confirms before removing one.
+  async function confirmRemovePreset(id: string, text: string): Promise<void> {
+    const confirmed = await confirmAlert({
+      title: "Delete Preset",
+      message: `Delete "${text}"? This cannot be undone.`,
+      primaryAction: { title: "Delete", style: Alert.ActionStyle.Destructive },
+    });
+    if (!confirmed) return;
+    await removePreset(id);
   }
 
   const customStatusAction = (
@@ -180,7 +203,7 @@ export default function Command() {
                   icon={Icon.Trash}
                   shortcut={{ macOS: { modifiers: ["ctrl"], key: "x" }, Windows: { modifiers: ["ctrl"], key: "x" } }}
                   style={Action.Style.Destructive}
-                  onAction={() => removePreset(preset.id)}
+                  onAction={() => confirmRemovePreset(preset.id, preset.text)}
                 />
                 {createPresetAction}
                 {customStatusAction}
