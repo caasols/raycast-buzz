@@ -1,6 +1,6 @@
-import { buildNip98Header, signEvent } from "./nostr";
+import { buildNip98Header, getPublicKeyHex, signEvent } from "./nostr";
 import { normalizeRelayUrl } from "./relay-url";
-import type { Channel, Filter, Message, NostrEvent } from "./types";
+import type { Channel, Filter, Message, NostrEvent, UserStatus } from "./types";
 
 export class RelayError extends Error {
   constructor(message: string) {
@@ -129,6 +129,19 @@ export class BuzzClient {
    */
   async clearStatus(): Promise<void> {
     await this.setStatus("");
+  }
+
+  /**
+   * Read our own NIP-38 status. Returns null when the newest event carries
+   * neither text nor emoji, which is how Buzz clients represent "no status".
+   */
+  async getStatus(): Promise<UserStatus | null> {
+    const pubkey = getPublicKeyHex(this.secretKey);
+    const events = await this.query([{ kinds: [30315], authors: [pubkey], "#d": ["general"], limit: 1 }]);
+    if (events.length === 0) return null;
+    const newest = events.reduce((a, b) => (b.created_at > a.created_at ? b : a));
+    const status = { text: newest.content, emoji: tagValue(newest, "emoji") ?? "" };
+    return status.text || status.emoji ? status : null;
   }
 
   // Presence (kind 20001) is WebSocket-only on the relay; the set-presence

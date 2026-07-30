@@ -360,3 +360,78 @@ describe("BuzzClient write helpers", () => {
     await expect(client.sendMessage("chan", "x")).rejects.toThrow(/auth or permission/);
   });
 });
+
+describe("BuzzClient.getStatus", () => {
+  it("queries kind 30315 for our own pubkey on the general coordinate", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    const qSpy = vi.spyOn(client, "query").mockResolvedValue([]);
+    await client.getStatus();
+    const filter = qSpy.mock.calls[0][0][0] as Record<string, unknown>;
+    expect(filter.kinds).toEqual([30315]);
+    expect(filter["#d"]).toEqual(["general"]);
+    expect((filter.authors as string[])[0]).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("returns the text and the emoji tag", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    vi.spyOn(client, "query").mockResolvedValue([
+      ev({
+        kind: 30315,
+        created_at: 10,
+        content: "in a meeting",
+        tags: [
+          ["d", "general"],
+          ["emoji", "\u{1F4C5}"],
+        ],
+      }),
+    ]);
+    expect(await client.getStatus()).toEqual({ text: "in a meeting", emoji: "\u{1F4C5}" });
+  });
+
+  it("returns an empty emoji when the event carries no emoji tag", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    vi.spyOn(client, "query").mockResolvedValue([
+      ev({ kind: 30315, created_at: 10, content: "heads down", tags: [["d", "general"]] }),
+    ]);
+    expect(await client.getStatus()).toEqual({ text: "heads down", emoji: "" });
+  });
+
+  it("returns null when there is no status event at all", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    vi.spyOn(client, "query").mockResolvedValue([]);
+    expect(await client.getStatus()).toBeNull();
+  });
+
+  it("reads a cleared status as null", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    vi.spyOn(client, "query").mockResolvedValue([
+      ev({ kind: 30315, created_at: 10, content: "", tags: [["d", "general"]] }),
+    ]);
+    expect(await client.getStatus()).toBeNull();
+  });
+
+  it("keeps a status that has an emoji but no text", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    vi.spyOn(client, "query").mockResolvedValue([
+      ev({
+        kind: 30315,
+        created_at: 10,
+        content: "",
+        tags: [
+          ["d", "general"],
+          ["emoji", "\u{1F334}"],
+        ],
+      }),
+    ]);
+    expect(await client.getStatus()).toEqual({ text: "", emoji: "\u{1F334}" });
+  });
+
+  it("uses the newest event when the relay returns several", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    vi.spyOn(client, "query").mockResolvedValue([
+      ev({ kind: 30315, created_at: 10, content: "old", tags: [["d", "general"]] }),
+      ev({ kind: 30315, created_at: 99, content: "new", tags: [["d", "general"]] }),
+    ]);
+    expect(await client.getStatus()).toEqual({ text: "new", emoji: "" });
+  });
+});

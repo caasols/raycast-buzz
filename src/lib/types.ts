@@ -38,3 +38,8 @@ export interface Message {
   createdAt: number;
   channelId: string;
 }
+
+export interface UserStatus {
+  text: string;
+  emoji: string;
+}
