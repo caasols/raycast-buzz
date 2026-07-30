@@ -1,5 +1,5 @@
 import { Form, ActionPanel, Action, showToast, Toast } from "@raycast/api";
-import { EMOJI } from "../lib/emoji";
+import { EMOJI, emojiSearchTerms } from "../lib/emoji";
 
 /**
  * The one form behind setting a custom status and creating or editing a
@@ -42,7 +42,7 @@ export function StatusForm({
             key={entry.shortcode}
             value={entry.char}
             title={`${entry.char}  ${entry.shortcode}`}
-            keywords={entry.keywords.split(" ")}
+            keywords={emojiSearchTerms(entry)}
           />
         ))}
       </Form.Dropdown>

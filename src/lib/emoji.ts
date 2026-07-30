@@ -130,3 +130,19 @@ export const EMOJI: EmojiEntry[] = [
   { char: "\u{1F517}", shortcode: ":link:", keywords: "link reference url" },
   { char: "\u{1F41D}", shortcode: ":bee:", keywords: "buzz busy working" },
 ];
+
+/**
+ * Every term the picker should match for one entry.
+ *
+ * The shortcode's own name has to be in here explicitly. It is visible in the
+ * item title, but only wrapped in colons (`:brain:`), and Raycast's filter does
+ * not match across that punctuation, so searching "brain" found nothing: the
+ * most obvious search term for an emoji was the one that could not find it.
+ *
+ * Underscored names are also split, so `:sneezing_face:` answers to
+ * "sneezing_face", "sneezing" and "face" alike.
+ */
+export function emojiSearchTerms(entry: EmojiEntry): string[] {
+  const name = entry.shortcode.replaceAll(":", "");
+  return [...new Set([name, ...name.split("_"), ...entry.keywords.split(" ")])];
+}
