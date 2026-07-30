@@ -48,6 +48,31 @@ export const environment = {
   launchType: LaunchType.UserInitiated,
 };
 
+/* ------------------------------------------------------------- LocalStorage */
+
+// An in-memory stand-in behind the real async API. `__resetLocalStorage` lets a
+// test start from a clean slate without reaching into module internals.
+const localStorageData = new Map<string, string>();
+
+export const LocalStorage = {
+  async getItem<T = string>(key: string): Promise<T | undefined> {
+    return localStorageData.get(key) as T | undefined;
+  },
+  async setItem(key: string, value: string | number | boolean): Promise<void> {
+    localStorageData.set(key, String(value));
+  },
+  async removeItem(key: string): Promise<void> {
+    localStorageData.delete(key);
+  },
+  async clear(): Promise<void> {
+    localStorageData.clear();
+  },
+};
+
+export function __resetLocalStorage(): void {
+  localStorageData.clear();
+}
+
 /* ------------------------------------------------------------- form plumbing */
 
 type FormValues = Record<string, string>;
