@@ -1,0 +1,113 @@
+/**
+ * @vitest-environment jsdom
+ */
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
+import type { Channel } from "./lib/types";
+
+const mocks = vi.hoisted(() => ({ getClient: vi.fn() }));
+vi.mock("./lib/preferences", () => ({ getClient: mocks.getClient }));
+
+import Command from "./search-channels";
+
+afterEach(cleanup);
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.getClient.mockReset();
+});
+
+const CHANNELS: Channel[] = [
+  { id: "uuid-1", name: "general", about: "the main room" },
+  { id: "uuid-2", name: "random", about: undefined },
+];
+
+function fakeClient(overrides: Record<string, unknown> = {}) {
+  return {
+    listChannels: vi.fn(async () => CHANNELS),
+    getMessages: vi.fn(async () => []),
+    ...overrides,
+  };
+}
+
+async function items() {
+  return waitFor(() => {
+    const found = screen.getAllByTestId("list-item");
+    expect(found.length).toBeGreaterThan(0);
+    return found;
+  });
+}
+
+describe("Search Channels", () => {
+  it("lists the channels from the relay", async () => {
+    mocks.getClient.mockReturnValue(fakeClient());
+    render(<Command />);
+    const rendered = await items();
+    expect(rendered.map((el) => el.dataset.title)).toEqual(["general", "random"]);
+    expect(rendered[0]).toHaveAttribute("data-subtitle", "the main room");
+  });
+
+  it("falls back to the channel id when a channel has no name", async () => {
+    mocks.getClient.mockReturnValue(fakeClient({ listChannels: vi.fn(async () => [{ id: "uuid-3", name: "" }]) }));
+    render(<Command />);
+    const rendered = await items();
+    expect(rendered[0]).toHaveAttribute("data-title", "uuid-3");
+  });
+
+  it("shows the empty view when the relay has no channels", async () => {
+    mocks.getClient.mockReturnValue(fakeClient({ listChannels: vi.fn(async () => []) }));
+    render(<Command />);
+    await waitFor(() => expect(screen.getByTestId("empty-view")).toHaveAttribute("data-title", "No channels"));
+  });
+
+  it("shows the error view when preferences are not configured", async () => {
+    mocks.getClient.mockImplementation(() => {
+      throw new Error("Set your Buzz relay URL (https:// or wss://) in extension preferences");
+    });
+    render(<Command />);
+    await waitFor(() =>
+      expect(screen.getByTestId("empty-view")).toHaveAttribute(
+        "data-description",
+        "Set your Buzz relay URL (https:// or wss://) in extension preferences",
+      ),
+    );
+  });
+
+  it("shows the error view when the relay is unreachable", async () => {
+    mocks.getClient.mockReturnValue(
+      fakeClient({
+        listChannels: vi.fn(async () => {
+          throw new Error("Cannot reach relay at https://relay.test");
+        }),
+      }),
+    );
+    render(<Command />);
+    await waitFor(() =>
+      expect(screen.getByTestId("empty-view")).toHaveAttribute(
+        "data-description",
+        "Cannot reach relay at https://relay.test",
+      ),
+    );
+  });
+
+  it("offers a copy action carrying the channel id", async () => {
+    mocks.getClient.mockReturnValue(fakeClient());
+    render(<Command />);
+    await items();
+    const copies = screen.getAllByTestId("action").filter((b) => b.dataset.kind === "copy");
+    expect(copies.map((b) => b.dataset.content)).toEqual(["uuid-1", "uuid-2"]);
+  });
+
+  it("drills into a channel's messages through the open action", async () => {
+    const client = fakeClient({ getMessages: vi.fn(async () => []) });
+    mocks.getClient.mockReturnValue(client);
+    render(<Command />);
+    await items();
+
+    const open = screen.getAllByTestId("action").find((b) => b.dataset.title === "Open Channel");
+    expect(open).toBeDefined();
+    fireEvent.click(open!);
+
+    // The pushed view loads that channel's messages.
+    await waitFor(() => expect(client.getMessages).toHaveBeenCalledWith("uuid-1"));
+  });
+});

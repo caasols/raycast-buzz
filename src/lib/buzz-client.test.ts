@@ -1,0 +1,333 @@
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { BuzzClient, RelayError } from "./buzz-client";
+import { parseSecretKey, signEvent } from "./nostr";
+import type { NostrEvent } from "./types";
+
+const SK = parseSecretKey("0000000000000000000000000000000000000000000000000000000000000001");
+const fetchMock = () => globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe("BuzzClient.query", () => {
+  it("posts filters as a JSON array to /query with a NIP-98 header", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify([{ id: "e1" }]), { status: 200 })),
+    );
+    const client = new BuzzClient("https://relay.test", SK);
+    const events = await client.query([{ kinds: [39000] }]);
+    expect(events).toEqual([{ id: "e1" }]);
+
+    const [url, init] = fetchMock().mock.calls[0];
+    expect(url).toBe("https://relay.test/query");
+    expect(init.method).toBe("POST");
+    expect((init.headers as Record<string, string>).Authorization.startsWith("Nostr ")).toBe(true);
+    expect(JSON.parse(init.body as string)).toEqual([{ kinds: [39000] }]);
+  });
+
+  it("strips a trailing slash from the relay URL", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("[]", { status: 200 })),
+    );
+    const client = new BuzzClient("https://relay.test/", SK);
+    await client.query([{ kinds: [9] }]);
+    expect(fetchMock().mock.calls[0][0]).toBe("https://relay.test/query");
+  });
+
+  it("throws RelayError on a non-2xx response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("denied", { status: 401 })),
+    );
+    const client = new BuzzClient("https://relay.test", SK);
+    await expect(client.query([{ kinds: [9] }])).rejects.toBeInstanceOf(RelayError);
+  });
+
+  it("surfaces the relay's JSON error body in the RelayError message", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ error: "invalid: kind 20001 is only accepted via WebSocket" }), {
+            status: 400,
+          }),
+      ),
+    );
+    const client = new BuzzClient("https://relay.test", SK);
+    await expect(client.query([{ kinds: [9] }])).rejects.toThrow(/invalid: kind 20001/);
+  });
+
+  it("reports an unreachable relay without echoing the underlying fetch error", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("ECONNREFUSED 10.0.0.1:443 body=<secret>");
+      }),
+    );
+    const client = new BuzzClient("https://relay.test", SK);
+    await expect(client.query([{ kinds: [9] }])).rejects.toThrow("Cannot reach relay at https://relay.test");
+    await expect(client.query([{ kinds: [9] }])).rejects.not.toThrow(/secret|ECONNREFUSED/);
+  });
+
+  it("omits the detail suffix when an error response has an empty body", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("", { status: 500 })),
+    );
+    const client = new BuzzClient("https://relay.test", SK);
+    await expect(client.query([{ kinds: [9] }])).rejects.toThrow("Relay rejected the request (status 500)");
+  });
+
+  it("still reports the status when the error body cannot be read", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 502,
+        text: async () => {
+          throw new Error("stream closed");
+        },
+      })),
+    );
+    const client = new BuzzClient("https://relay.test", SK);
+    await expect(client.query([{ kinds: [9] }])).rejects.toThrow("Relay rejected the request (status 502)");
+  });
+
+  it("uses a non-JSON error body verbatim", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("upstream timeout", { status: 504 })),
+    );
+    const client = new BuzzClient("https://relay.test", SK);
+    await expect(client.query([{ kinds: [9] }])).rejects.toThrow(/upstream timeout/);
+  });
+
+  it("bounds a long relay error body", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ error: "x".repeat(500) }), { status: 400 })),
+    );
+    const client = new BuzzClient("https://relay.test", SK);
+    await expect(client.query([{ kinds: [9] }])).rejects.toThrow(/x{200}(?!x)/);
+  });
+
+  it("ignores a JSON error body whose error field is not a string", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ error: { code: 7 } }), { status: 400 })),
+    );
+    const client = new BuzzClient("https://relay.test", SK);
+    // Falls back to the raw body rather than rendering "[object Object]".
+    await expect(client.query([{ kinds: [9] }])).rejects.toThrow(/\{"error":\{"code":7\}\}/);
+  });
+
+  it("throws RelayError instead of a TypeError when the body is not an array", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ error: null }), { status: 200 })),
+    );
+    const client = new BuzzClient("https://relay.test", SK);
+    await expect(client.query([{ kinds: [9] }])).rejects.toBeInstanceOf(RelayError);
+    await expect(client.query([{ kinds: [9] }])).rejects.toThrow(/unexpected response/);
+  });
+});
+
+describe("BuzzClient.publish", () => {
+  it("defaults accepted to false and message to empty when the relay omits them", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ event_id: "abc" }), { status: 200 })),
+    );
+    const client = new BuzzClient("https://relay.test", SK);
+    const ev = signEvent({ kind: 9, created_at: 1700000000, tags: [], content: "hi" }, SK);
+    expect(await client.publish(ev)).toEqual({ accepted: false, message: "" });
+  });
+
+  it("posts a single signed event to /events and returns accepted/message", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () => new Response(JSON.stringify({ event_id: "abc", accepted: true, message: "" }), { status: 200 }),
+      ),
+    );
+    const client = new BuzzClient("https://relay.test", SK);
+    const ev = signEvent({ kind: 9, created_at: 1700000000, tags: [["h", "c"]], content: "hi" }, SK);
+    const res = await client.publish(ev);
+    expect(res).toEqual({ accepted: true, message: "" });
+
+    const [url, init] = fetchMock().mock.calls[0];
+    expect(url).toBe("https://relay.test/events");
+    expect(JSON.parse(init.body as string).kind).toBe(9);
+  });
+});
+
+function ev(partial: Partial<NostrEvent>): NostrEvent {
+  return { id: "", pubkey: "", created_at: 0, kind: 0, tags: [], content: "", sig: "", ...partial };
+}
+
+describe("BuzzClient.listChannels", () => {
+  it("queries kind 39000 and maps d/name/about tags", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    const qSpy = vi.spyOn(client, "query").mockResolvedValue([
+      ev({
+        kind: 39000,
+        tags: [
+          ["d", "uuid-1"],
+          ["name", "general"],
+          ["about", "the main room"],
+        ],
+      }),
+    ]);
+    const channels = await client.listChannels();
+    expect(qSpy).toHaveBeenCalledWith([{ kinds: [39000] }]);
+    expect(channels).toEqual([{ id: "uuid-1", name: "general", about: "the main room" }]);
+  });
+
+  it("keeps an identified channel that carries no name or about tag", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    vi.spyOn(client, "query").mockResolvedValue([ev({ kind: 39000, tags: [["d", "uuid-9"]] })]);
+    expect(await client.listChannels()).toEqual([{ id: "uuid-9", name: "", about: undefined }]);
+  });
+
+  it("drops channels with no d tag, which have no usable identifier", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    vi.spyOn(client, "query").mockResolvedValue([
+      ev({ kind: 39000, tags: [["name", "no-identifier"]] }),
+      ev({
+        kind: 39000,
+        tags: [
+          ["d", "uuid-1"],
+          ["name", "general"],
+        ],
+      }),
+      ev({ kind: 39000, tags: [["name", "also-no-identifier"]] }),
+    ]);
+    const channels = await client.listChannels();
+    expect(channels).toEqual([{ id: "uuid-1", name: "general", about: undefined }]);
+  });
+});
+
+describe("BuzzClient.getMessages", () => {
+  it("builds a kind:9 #h filter with limit and returns newest-first", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    const qSpy = vi
+      .spyOn(client, "query")
+      .mockResolvedValue([
+        ev({ id: "old", pubkey: "a", created_at: 100, kind: 9, tags: [["h", "chan"]], content: "old" }),
+        ev({ id: "new", pubkey: "b", created_at: 200, kind: 9, tags: [["h", "chan"]], content: "new" }),
+      ]);
+    const msgs = await client.getMessages("chan", 10);
+    expect(qSpy).toHaveBeenCalledWith([{ kinds: [9], "#h": ["chan"], limit: 10 }]);
+    expect(msgs.map((m) => m.content)).toEqual(["new", "old"]);
+    expect(msgs[0]).toMatchObject({ id: "new", author: "b", channelId: "chan", createdAt: 200 });
+  });
+
+  it("defaults the limit to 50", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    const qSpy = vi.spyOn(client, "query").mockResolvedValue([]);
+    await client.getMessages("chan");
+    expect(qSpy).toHaveBeenCalledWith([{ kinds: [9], "#h": ["chan"], limit: 50 }]);
+  });
+});
+
+describe("BuzzClient message mapping", () => {
+  it("maps a message with no h tag to an empty channel id", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    vi.spyOn(client, "query").mockResolvedValue([ev({ id: "m", pubkey: "a", created_at: 1, kind: 9, content: "x" })]);
+    const msgs = await client.getMessages("chan");
+    expect(msgs[0].channelId).toBe("");
+  });
+});
+
+describe("BuzzClient.searchMessages", () => {
+  it("defaults the limit to 50 when no options are given", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    const qSpy = vi.spyOn(client, "query").mockResolvedValue([]);
+    await client.searchMessages("hello");
+    expect(qSpy).toHaveBeenCalledWith([{ search: "hello", kinds: [9], limit: 50 }]);
+  });
+
+  it("builds a NIP-50 search filter and maps results", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    const qSpy = vi
+      .spyOn(client, "query")
+      .mockResolvedValue([
+        ev({ id: "m", pubkey: "a", created_at: 5, kind: 9, tags: [["h", "chan"]], content: "hello world" }),
+      ]);
+    const msgs = await client.searchMessages("hello", { limit: 25 });
+    expect(qSpy).toHaveBeenCalledWith([{ search: "hello", kinds: [9], limit: 25 }]);
+    expect(msgs[0]).toMatchObject({ content: "hello world", channelId: "chan" });
+  });
+});
+
+describe("BuzzClient write helpers", () => {
+  it("sendMessage publishes a signed kind:9 with an h tag", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    const pSpy = vi.spyOn(client, "publish").mockResolvedValue({ accepted: true, message: "" });
+    await client.sendMessage("chan", "hello");
+    const published = pSpy.mock.calls[0][0];
+    expect(published.kind).toBe(9);
+    expect(published.content).toBe("hello");
+    expect(published.tags).toContainEqual(["h", "chan"]);
+    expect(published.sig).toMatch(/^[0-9a-f]{128}$/);
+  });
+
+  it("react publishes a signed kind:7 with e and h tags", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    const pSpy = vi.spyOn(client, "publish").mockResolvedValue({ accepted: true, message: "" });
+    await client.react("m1", "chan", "+");
+    const published = pSpy.mock.calls[0][0];
+    expect(published.kind).toBe(7);
+    expect(published.content).toBe("+");
+    expect(published.tags).toContainEqual(["e", "m1"]);
+    expect(published.tags).toContainEqual(["h", "chan"]);
+  });
+
+  it("setStatus publishes kind:30315 with a d:general tag, prepending an emoji when given", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    const pSpy = vi.spyOn(client, "publish").mockResolvedValue({ accepted: true, message: "" });
+    await client.setStatus("in a meeting", "x");
+    const published = pSpy.mock.calls[0][0];
+    expect(published.kind).toBe(30315);
+    expect(published.tags).toContainEqual(["d", "general"]);
+    expect(published.content).toBe("x in a meeting");
+  });
+
+  it("setStatus without an emoji uses the text as-is", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    const pSpy = vi.spyOn(client, "publish").mockResolvedValue({ accepted: true, message: "" });
+    await client.setStatus("heads down");
+    expect(pSpy.mock.calls[0][0].content).toBe("heads down");
+  });
+
+  it("setPresence publishes ephemeral kind:20001 with the state as content", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    const pSpy = vi.spyOn(client, "publish").mockResolvedValue({ accepted: true, message: "" });
+    await client.setPresence("away");
+    const published = pSpy.mock.calls[0][0];
+    expect(published.kind).toBe(20001);
+    expect(published.content).toBe("away");
+  });
+
+  it("throws RelayError when a publish is not accepted", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    vi.spyOn(client, "publish").mockResolvedValue({ accepted: false, message: "restricted" });
+    await expect(client.sendMessage("chan", "x")).rejects.toBeInstanceOf(RelayError);
+  });
+
+  it("surfaces the relay's reason when it rejects a publish", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    vi.spyOn(client, "publish").mockResolvedValue({
+      accepted: false,
+      message: "invalid: kind 20001 is only accepted via WebSocket",
+    });
+    await expect(client.setPresence("online")).rejects.toThrow(/only accepted via WebSocket/);
+  });
+
+  it("falls back to a generic reason when the relay gives no message", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    vi.spyOn(client, "publish").mockResolvedValue({ accepted: false, message: "" });
+    await expect(client.sendMessage("chan", "x")).rejects.toThrow(/auth or permission/);
+  });
+});
