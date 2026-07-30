@@ -38,7 +38,12 @@ export function StatusForm({
       <Form.Dropdown id="emoji" title="Emoji" defaultValue={initialEmoji ?? ""}>
         <Form.Dropdown.Item value="" title="None" />
         {EMOJI.map((entry) => (
-          <Form.Dropdown.Item key={entry.shortcode} value={entry.char} title={`${entry.char}  ${entry.shortcode}`} />
+          <Form.Dropdown.Item
+            key={entry.shortcode}
+            value={entry.char}
+            title={`${entry.char}  ${entry.shortcode}`}
+            keywords={entry.keywords.split(" ")}
+          />
         ))}
       </Form.Dropdown>
       <Form.TextField id="text" title="Status" placeholder="What's your status?" defaultValue={initialText ?? ""} />

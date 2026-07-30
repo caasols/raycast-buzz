@@ -263,8 +263,12 @@ function FormTextArea(props: { id: string; title?: string; placeholder?: string;
   );
 }
 
-function FormDropdownItem(props: { value: string; title?: string }) {
-  return <option value={props.value}>{props.title}</option>;
+function FormDropdownItem(props: { value: string; title?: string; keywords?: string[] }) {
+  return (
+    <option value={props.value} data-keywords={props.keywords?.join(" ")}>
+      {props.title}
+    </option>
+  );
 }
 
 function FormDropdown(props: { id: string; title?: string; children?: ReactNode; defaultValue?: string }) {

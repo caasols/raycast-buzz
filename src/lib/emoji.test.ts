@@ -20,7 +20,7 @@ describe("EMOJI dataset", () => {
     }
   });
 
-  it("gives every entry keywords, which the dropdown title exposes to Raycast's filter", () => {
+  it("gives every entry non-empty keywords, which the dropdown item passes to Raycast's filter", () => {
     for (const entry of EMOJI) {
       expect(entry.keywords.trim().length).toBeGreaterThan(0);
     }

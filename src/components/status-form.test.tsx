@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
 import { showToast, Toast } from "@raycast/api";
 import { StatusForm } from "./status-form";
+import { EMOJI } from "../lib/emoji";
 
 afterEach(cleanup);
 beforeEach(() => vi.clearAllMocks());
@@ -76,7 +77,17 @@ describe("StatusForm", () => {
   it("offers a none option plus one item per emoji", () => {
     render(<StatusForm submitTitle="Set Status" onSubmit={vi.fn()} />);
     const options = screen.getByTestId("field-emoji").querySelectorAll("option");
-    expect(options.length).toBeGreaterThan(80);
+    expect(options.length).toBe(EMOJI.length + 1);
     expect(options[0]).toHaveValue("");
+  });
+
+  it("passes each emoji's keywords to its dropdown item, so Raycast can filter on them", () => {
+    render(<StatusForm submitTitle="Set Status" onSubmit={vi.fn()} />);
+    const options = screen.getByTestId("field-emoji").querySelectorAll("option");
+    // options[0] is the None item, with no keywords of its own; the rest map
+    // 1:1 onto EMOJI in order.
+    EMOJI.forEach((entry, i) => {
+      expect(options[i + 1]).toHaveAttribute("data-keywords", entry.keywords);
+    });
   });
 });
