@@ -81,24 +81,28 @@ describe("StatusForm", () => {
     expect(options[0]).toHaveValue("");
   });
 
-  it("passes each emoji's full search terms to its dropdown item, so Raycast can filter on them", () => {
+  it("wires each emoji's full search terms from emojiSearchTerms onto its dropdown item", () => {
     render(<StatusForm submitTitle="Set Status" onSubmit={vi.fn()} />);
     const options = screen.getByTestId("field-emoji").querySelectorAll("option");
     // options[0] is the None item, with no keywords of its own; the rest map
-    // 1:1 onto EMOJI in order.
+    // 1:1 onto EMOJI in order. The item's `keywords` prop is not what performs
+    // the filtering below (Raycast does not honour it); this only proves the
+    // terms are wired through so they exist to be asserted on.
     EMOJI.forEach((entry, i) => {
       expect(options[i + 1]).toHaveAttribute("data-keywords", emojiSearchTerms(entry).join(" "));
     });
   });
 
-  it("lets the user find an emoji by its own name, which is the whole point", () => {
+  it("includes the shortcode's own name among an emoji's dropdown search terms", () => {
     render(<StatusForm submitTitle="Set Status" onSubmit={vi.fn()} />);
     const brain = Array.from(screen.getByTestId("field-emoji").querySelectorAll("option")).find((o) =>
       o.textContent?.includes(":brain:"),
     );
-    // Regression guard: the title only ever carried ":brain:", and Raycast's
-    // filter does not match across the colons, so searching "brain" found
-    // nothing until the shortcode's name became a keyword in its own right.
+    // Regression guard: this item's data-keywords must include "brain", the
+    // shortcode's own name, because emojiSearchTerms is what our own
+    // searchEmoji matches against (see the query-typing tests below). Raycast's
+    // native filter does not honour this keywords prop at all, so this proves
+    // only that the term is wired through, not that Raycast filters on it.
     expect(brain?.getAttribute("data-keywords")?.split(" ")).toContain("brain");
   });
   it("filters the dropdown as you type, by plain name", () => {
@@ -143,5 +147,15 @@ describe("StatusForm", () => {
     fireEvent.change(screen.getByTestId("field-emoji-search"), { target: { value: "brain" } });
     const values = Array.from(screen.getByTestId("field-emoji").querySelectorAll("option")).map((o) => o.value);
     expect(values).toContain("\u{1F41D}");
+  });
+
+  it("submits the pinned emoji even after a query that excludes it from the visible matches", async () => {
+    const onSubmit = vi.fn(async () => undefined);
+    render(<StatusForm submitTitle="Save Preset" initialEmoji={"\u{1F41D}"} initialText="busy" onSubmit={onSubmit} />);
+    // "brain" does not match the bee, so without the pin the dropdown's
+    // rendered options would no longer include the selected value at all.
+    fireEvent.change(screen.getByTestId("field-emoji-search"), { target: { value: "brain" } });
+    submit();
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ emoji: "\u{1F41D}", text: "busy" }));
   });
 });

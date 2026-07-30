@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { Form, ActionPanel, Action, showToast, Toast } from "@raycast/api";
-import { emojiSearchTerms, searchEmoji } from "../lib/emoji";
+import { EMOJI, emojiSearchTerms, searchEmoji } from "../lib/emoji";
 
 /** The entry for a chosen char, as a 0 or 1 element list, so it can be spread. */
 function pinned(char: string) {
-  return searchEmoji("").filter((entry) => entry.char === char);
+  return EMOJI.filter((entry) => entry.char === char);
 }
 
 /**
@@ -33,8 +33,9 @@ export function StatusForm({
   // The chosen emoji stays rendered even when it does not match the query.
   // Without this, typing after picking one drops it from the children and the
   // dropdown loses its value, which would silently blank the emoji when editing
-  // an existing preset.
-  const visible = selected && !matches.some((e) => e.char === selected) ? [...matches, ...pinned(selected)] : matches;
+  // an existing preset. It is rendered first, ahead of the matches, so a
+  // selection does not sink to the bottom of a filtered list.
+  const visible = selected && !matches.some((e) => e.char === selected) ? [...pinned(selected), ...matches] : matches;
 
   async function handleSubmit(values: { emoji: string; text: string }) {
     const emoji = values.emoji.trim();
