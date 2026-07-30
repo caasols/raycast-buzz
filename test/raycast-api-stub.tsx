@@ -35,6 +35,8 @@ export const Toast = {
 
 export const LaunchType = { UserInitiated: "userInitiated", Background: "background" };
 
+export const useNavigation = () => ({ push: vi.fn(), pop: vi.fn() });
+
 export const Icon = new Proxy({}, { get: (_t, name) => String(name) }) as Record<string, string>;
 export const Color = new Proxy({}, { get: (_t, name) => String(name) }) as Record<string, string>;
 
@@ -129,11 +131,15 @@ export function List(props: {
   const items: ReactNode[] = [];
   const emptyViews: ReactNode[] = [];
 
-  Children.forEach(props.children, (child) => {
-    if (!isValidElement(child)) return;
-    if (child.type === ListEmptyView) emptyViews.push(child);
-    else items.push(child);
-  });
+  const collect = (nodes: ReactNode) => {
+    Children.forEach(nodes, (child) => {
+      if (!isValidElement(child)) return;
+      if (child.type === ListEmptyView) emptyViews.push(child);
+      else if (child.type === ListSection) collect((child.props as { children?: ReactNode }).children);
+      else items.push(child);
+    });
+  };
+  collect(props.children);
 
   return (
     <div
