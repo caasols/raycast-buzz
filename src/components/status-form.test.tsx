@@ -38,9 +38,10 @@ describe("StatusForm", () => {
 
   it("prefills from the initial values it was given", () => {
     render(
-      <StatusForm submitTitle="Save Preset" initialEmoji="\u{1F9E0}" initialText="Focus time" onSubmit={vi.fn()} />,
+      <StatusForm submitTitle="Save Preset" initialEmoji={"\u{1F9E0}"} initialText="Focus time" onSubmit={vi.fn()} />,
     );
     expect(screen.getByTestId("field-text")).toHaveValue("Focus time");
+    expect(screen.getByTestId("field-emoji")).toHaveValue("\u{1F9E0}");
   });
 
   it("refuses a submit with neither emoji nor text", async () => {
