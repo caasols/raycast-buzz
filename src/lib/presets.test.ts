@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { LocalStorage, __resetLocalStorage } from "@raycast/api";
 import {
   listPresets,
