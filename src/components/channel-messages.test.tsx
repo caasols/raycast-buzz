@@ -100,6 +100,41 @@ describe("ChannelMessages", () => {
       ),
     );
   });
+
+  it("offers Open in Buzz as the first action, targeting the message's deep link", async () => {
+    render(<ChannelMessages client={fakeClient()} channel={CHANNEL} />);
+    await items();
+    const actions = screen.getAllByTestId("action");
+    expect(actions[0]).toHaveAttribute("data-title", "Open in Buzz");
+    expect(actions[0]).toHaveAttribute("data-target", "buzz://message?channel=chan-1&id=m1");
+  });
+
+  it("offers Copy Link carrying the same deep link", async () => {
+    render(<ChannelMessages client={fakeClient()} channel={CHANNEL} />);
+    await items();
+    const copy = screen.getAllByTestId("action").find((b) => b.dataset.title === "Copy Link");
+    expect(copy).toHaveAttribute("data-content", "buzz://message?channel=chan-1&id=m1");
+  });
+
+  it("falls back to the channel being viewed when the message carries no channel id", async () => {
+    const client = fakeClient({ getMessages: vi.fn(async () => [message({ channelId: "" })]) });
+    render(<ChannelMessages client={client} channel={CHANNEL} />);
+    await items();
+    const open = screen.getAllByTestId("action").find((b) => b.dataset.title === "Open in Buzz");
+    // The h tag is authoritative where it exists; inside a channel we already
+    // know which one we are looking at, so a tagless message is still linkable.
+    expect(open).toHaveAttribute("data-target", "buzz://message?channel=chan-1&id=m1");
+  });
+
+  it("keeps React (Like) available, just not on Enter", async () => {
+    const client = fakeClient();
+    render(<ChannelMessages client={client} channel={CHANNEL} />);
+    await items();
+    const react = screen.getAllByTestId("action").find((b) => b.dataset.title === "React (Like)");
+    expect(react).toBeDefined();
+    fireEvent.click(react!);
+    await waitFor(() => expect(client.react).toHaveBeenCalledWith("m1", "chan-1", "+"));
+  });
 });
 
 describe("ChannelMessages react action", () => {
@@ -180,6 +215,6 @@ describe("ChannelMessages react action", () => {
     await items();
 
     const copies = screen.getAllByTestId("action").filter((b) => b.dataset.kind === "copy");
-    expect(copies.map((b) => b.dataset.content)).toEqual(["hello", "m1"]);
+    expect(copies.map((b) => b.dataset.content)).toEqual(["buzz://message?channel=chan-1&id=m1", "hello", "m1"]);
   });
 });
