@@ -108,9 +108,27 @@ export class BuzzClient {
     });
   }
 
+  /**
+   * Publish a NIP-38 status. Buzz carries the emoji in a dedicated `emoji`
+   * tag, not inside the content: its desktop and mobile clients read
+   * `tags.find((t) => t[0] === "emoji")`, so an emoji folded into the text
+   * would render as literal characters with no emoji field.
+   */
   async setStatus(text: string, emoji?: string): Promise<void> {
-    const content = emoji ? `${emoji} ${text}` : text;
-    await this.publishSigned({ kind: 30315, tags: [["d", "general"]], content });
+    const trimmedEmoji = emoji?.trim() ?? "";
+    const tags: string[][] = [["d", "general"]];
+    if (trimmedEmoji) {
+      tags.push(["emoji", trimmedEmoji]);
+    }
+    await this.publishSigned({ kind: 30315, tags, content: text.trim() });
+  }
+
+  /**
+   * Clear the status. Kind 30315 is parameterized-replaceable, so an event
+   * with neither text nor emoji is what Buzz clients read as "no status".
+   */
+  async clearStatus(): Promise<void> {
+    await this.setStatus("");
   }
 
   // Presence (kind 20001) is WebSocket-only on the relay; the set-presence

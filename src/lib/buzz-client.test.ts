@@ -284,21 +284,50 @@ describe("BuzzClient write helpers", () => {
     expect(published.tags).toContainEqual(["h", "chan"]);
   });
 
-  it("setStatus publishes kind:30315 with a d:general tag, prepending an emoji when given", async () => {
+  it("puts the emoji in an emoji tag rather than concatenating it into the content", async () => {
     const client = new BuzzClient("https://relay.test", SK);
     const pSpy = vi.spyOn(client, "publish").mockResolvedValue({ accepted: true, message: "" });
-    await client.setStatus("in a meeting", "x");
+    await client.setStatus("in a meeting", "\u{1F4C5}");
     const published = pSpy.mock.calls[0][0];
     expect(published.kind).toBe(30315);
+    expect(published.content).toBe("in a meeting");
     expect(published.tags).toContainEqual(["d", "general"]);
-    expect(published.content).toBe("x in a meeting");
+    expect(published.tags).toContainEqual(["emoji", "\u{1F4C5}"]);
   });
 
-  it("setStatus without an emoji uses the text as-is", async () => {
+  it("omits the emoji tag entirely when no emoji is given", async () => {
     const client = new BuzzClient("https://relay.test", SK);
     const pSpy = vi.spyOn(client, "publish").mockResolvedValue({ accepted: true, message: "" });
     await client.setStatus("heads down");
-    expect(pSpy.mock.calls[0][0].content).toBe("heads down");
+    const published = pSpy.mock.calls[0][0];
+    expect(published.content).toBe("heads down");
+    expect(published.tags.some((t) => t[0] === "emoji")).toBe(false);
+  });
+
+  it("treats a blank emoji as no emoji", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    const pSpy = vi.spyOn(client, "publish").mockResolvedValue({ accepted: true, message: "" });
+    await client.setStatus("heads down", "   ");
+    expect(pSpy.mock.calls[0][0].tags.some((t) => t[0] === "emoji")).toBe(false);
+  });
+
+  it("trims the status text and the emoji", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    const pSpy = vi.spyOn(client, "publish").mockResolvedValue({ accepted: true, message: "" });
+    await client.setStatus("  heads down  ", "  \u{1F9E0}  ");
+    const published = pSpy.mock.calls[0][0];
+    expect(published.content).toBe("heads down");
+    expect(published.tags).toContainEqual(["emoji", "\u{1F9E0}"]);
+  });
+
+  it("clearStatus publishes empty content with no emoji tag", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    const pSpy = vi.spyOn(client, "publish").mockResolvedValue({ accepted: true, message: "" });
+    await client.clearStatus();
+    const published = pSpy.mock.calls[0][0];
+    expect(published.kind).toBe(30315);
+    expect(published.content).toBe("");
+    expect(published.tags).toEqual([["d", "general"]]);
   });
 
   it("setPresence publishes ephemeral kind:20001 with the state as content", async () => {
