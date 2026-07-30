@@ -3,7 +3,14 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
-import { showToast, Toast, __resetLocalStorage, pop, LocalStorage } from "@raycast/api";
+import { showToast, Toast, LocalStorage } from "@raycast/api";
+// `__resetLocalStorage` and `pop` are stub-only test helpers that the real
+// @raycast/api package does not declare, so they are imported by relative
+// path rather than through the "@raycast/api" specifier (which vitest
+// aliases to this same file for runtime resolution; see vitest.config.ts).
+// This keeps `tsc` type-checking the rest of the import against the real
+// package's types.
+import { __resetLocalStorage, pop } from "../test/raycast-api-stub";
 
 const mocks = vi.hoisted(() => ({ getClient: vi.fn() }));
 vi.mock("./lib/preferences", () => ({ getClient: mocks.getClient }));

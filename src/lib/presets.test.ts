@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { LocalStorage, __resetLocalStorage } from "@raycast/api";
+import { LocalStorage } from "@raycast/api";
+// `__resetLocalStorage` is a stub-only test helper that the real @raycast/api
+// package does not declare, so it is imported by relative path rather than
+// through the "@raycast/api" specifier (which vitest aliases to this same
+// file for runtime resolution; see vitest.config.ts). This keeps `tsc`
+// type-checking the rest of the import against the real package's types.
+import { __resetLocalStorage } from "../../test/raycast-api-stub";
 import {
   listPresets,
   createPreset,
