@@ -5,7 +5,7 @@ import { getClient } from "./lib/preferences";
 import { searchPeople } from "./lib/directory";
 import { ErrorView } from "./components/error-view";
 import { ComposeMessage } from "./components/compose-message";
-import type { Person } from "./lib/types";
+import type { DirectMessage, Person } from "./lib/types";
 
 function reason(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -17,7 +17,22 @@ export default function Command() {
 
   const { isLoading, data, error } = usePromise(async () => {
     const client = getClient();
-    const [channels, conversations] = await Promise.all([client.listChannels(), client.listDirectMessages()]);
+    // Channels decide whether this command works at all, so a failure there is
+    // fatal and reaches ErrorView. Conversations are additive: posting to a
+    // channel shipped long before DMs existed and must not stop working because
+    // a DM query failed, so that one degrades to an empty section plus a toast.
+    // Set Status draws the same line around its own status fetch.
+    const [channels, conversations] = await Promise.all([
+      client.listChannels(),
+      client.listDirectMessages().catch(async (e: unknown) => {
+        await showToast({
+          style: Toast.Style.Failure,
+          title: "Could not load conversations",
+          message: reason(e),
+        });
+        return [] as DirectMessage[];
+      }),
+    ]);
     return { client, channels, conversations };
   });
 

@@ -287,10 +287,10 @@ describe("Send Message", () => {
     );
   });
 
-  it("renders the error view when a channel or conversation fetch rejects", async () => {
+  it("renders the error view when the channel fetch rejects", async () => {
     mocks.getClient.mockReturnValue(
       fakeClient({
-        listDirectMessages: vi.fn(async () => {
+        listChannels: vi.fn(async () => {
           throw new Error("Relay rejected the request: not allowed");
         }),
       }),
@@ -302,6 +302,47 @@ describe("Send Message", () => {
         "Relay rejected the request: not allowed",
       ),
     );
+  });
+
+  it("keeps channels usable when the conversation fetch rejects", async () => {
+    // Posting to a channel shipped long before DMs existed, so a failing DM
+    // query must not take the whole command down with it.
+    mocks.getClient.mockReturnValue(
+      fakeClient({
+        listDirectMessages: vi.fn(async () => {
+          throw new Error("Relay rejected the request: not allowed");
+        }),
+      }),
+    );
+    render(<Command />);
+    await loaded();
+
+    expect(showToast).toHaveBeenCalledWith({
+      style: Toast.Style.Failure,
+      title: "Could not load conversations",
+      message: "Relay rejected the request: not allowed",
+    });
+    expect(rowTitled("general").getAttribute("data-section")).toBe("Channels");
+    expect(rows().some((r) => r.getAttribute("data-section") === "Direct Messages")).toBe(false);
+    expect(screen.queryByTestId("empty-view")).toBeNull();
+  });
+
+  it("reports a non-Error conversation failure as text", async () => {
+    mocks.getClient.mockReturnValue(
+      fakeClient({
+        listDirectMessages: vi.fn(async () => {
+          throw "socket closed";
+        }),
+      }),
+    );
+    render(<Command />);
+    await loaded();
+
+    expect(showToast).toHaveBeenCalledWith({
+      style: Toast.Style.Failure,
+      title: "Could not load conversations",
+      message: "socket closed",
+    });
   });
 
   it("asks Raycast for native filtering, since onSearchTextChange otherwise turns it off", async () => {
