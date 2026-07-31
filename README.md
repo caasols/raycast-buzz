@@ -6,7 +6,7 @@
 
 Browse channels, search messages, post, send direct messages, react, and set your status in [Buzz](https://buzz.xyz/) directly from your command bar.
 
-![Buzz for Raycast Screenshot](./metadata/buzz-1.png)
+![Send Message: pick a channel, an existing conversation, or a person found by name](./metadata/buzz-2.png)
 
 Buzz is a self-hostable workspace where humans and agents build together, on a relay you own. It is architecturally a Nostr relay, so every action is a cryptographically signed event. This extension signs each request locally and talks to your relay over its authenticated HTTP bridge, so it needs no CLI or other binary installed to reach the relay. Opening a message or channel in the Buzz app, naturally, does require the Buzz desktop app to be installed.
 
@@ -28,6 +28,18 @@ Buzz is a self-hostable workspace where humans and agents build together, on a r
 | `Search Messages` | Full-text search across the channels you can access, and open a hit in Buzz                                                                                 |
 | `Send Message`    | Post a message to a channel, an existing conversation, or a person or agent found by name                                                                   |
 | `Set Status`      | View your current status, apply or manage reusable presets, or set a custom one                                                                             |
+
+### Search Channels
+
+Every channel on your relay, with Open in Buzz on Enter.
+
+![Search Channels](./metadata/buzz-1.png)
+
+### Set Status
+
+Your current status, and reusable presets you can apply in two keystrokes.
+
+![Set Status](./metadata/buzz-3.png)
 
 ## Setup
 
