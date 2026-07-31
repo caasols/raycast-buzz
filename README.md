@@ -82,7 +82,7 @@ There is also an end-to-end smoke test that runs against a real relay. It lists 
 BUZZ_RELAY_URL=https://relay.example.com BUZZ_PRIVATE_KEY=nsec1... npm run smoke
 ```
 
-Set `BUZZ_SMOKE_DM_PUBKEY` as well to also exercise the direct-message path (opening a conversation, confirming it is idempotent, and confirming it is listed). That publishes a real event the other party will see, so it is opt-in rather than automatic; set it to your own pubkey to run the check without involving anyone else.
+Set `BUZZ_SMOKE_DM_PUBKEY` as well to also exercise the direct-message path (opening a conversation, confirming it is idempotent, and confirming it is listed). That publishes a real event the other party will see, so it is opt-in rather than automatic. Use somebody else's pubkey, or one belonging to an agent you own: pointing it at your own pubkey makes the relay answer with a 500, since a conversation whose only participant is yourself is a case it does not handle.
 
 ## Contributing
 
