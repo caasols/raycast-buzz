@@ -18,8 +18,16 @@ export class RelayError extends Error {
   }
 }
 
+/**
+ * The value of the first tag with the given name. A tag is only usable when it
+ * is an array carrying a string value: live Buzz DM events genuinely contain
+ * valueless tags such as `["private"]`, and a relay is free to send a tag as a
+ * bare string, which would otherwise be indexed character by character
+ * (`"private"[0] === "p"`). Either shape must not shadow the real tag.
+ */
 function tagValue(event: NostrEvent, name: string): string | undefined {
-  return event.tags.find((t) => t[0] === name)?.[1];
+  const tag = event.tags.find((t) => Array.isArray(t) && t[0] === name && typeof t[1] === "string");
+  return tag?.[1];
 }
 
 /**
@@ -27,16 +35,16 @@ function tagValue(event: NostrEvent, name: string): string | undefined {
  * rather than an ordinary channel. Verified empirically against a live
  * relay: a DM is not its own event kind, it is a 39000 event carrying a
  * `["t","dm"]` tag. `listChannels` uses this to exclude DMs from the channel
- * list; `listDirectMessages` uses it to find them. Exported so tests can
- * exercise it directly if needed, though the two public methods already
- * cover it.
+ * list; `listDirectMessages` uses it to find them. The tag's value matters as
+ * much as its name: a channel carrying an ordinary topic tag such as
+ * `["t","announcements"]` is not a DM and must stay in the channel list.
  */
-export function isDmChannel(event: NostrEvent): boolean {
-  return event.kind === 39000 && event.tags.some((tag) => tag[0] === "t" && tag[1] === "dm");
+function isDmChannel(event: NostrEvent): boolean {
+  return event.kind === 39000 && event.tags.some((tag) => Array.isArray(tag) && tag[0] === "t" && tag[1] === "dm");
 }
 
 function hasParticipant(event: NostrEvent, pubkey: string): boolean {
-  return event.tags.some((tag) => tag[0] === "p" && tag[1] === pubkey);
+  return event.tags.some((tag) => Array.isArray(tag) && tag[0] === "p" && tag[1] === pubkey);
 }
 
 function toChannel(event: NostrEvent): Channel {
@@ -58,8 +66,14 @@ function toMessage(event: NostrEvent): Message {
   };
 }
 
+/**
+ * Newest first, with the id as a tie-break so the order is total. Without the
+ * tie-break, two messages sharing a `created_at` (Buzz stamps whole seconds)
+ * order arbitrarily, and the one that survives a `limit` boundary flips between
+ * refreshes.
+ */
 function newestFirst(a: Message, b: Message): number {
-  return b.createdAt - a.createdAt;
+  return b.createdAt - a.createdAt || a.id.localeCompare(b.id);
 }
 
 /**
@@ -74,9 +88,12 @@ function isReplaceableKind(kind: number): boolean {
   return (kind >= 10000 && kind <= 19999) || (kind >= 30000 && kind <= 39999);
 }
 
+function replaceableDTag(tags: string[][]): string {
+  return tags.find((t) => t[0] === "d")?.[1] ?? "";
+}
+
 function replaceableCoordinate(kind: number, tags: string[][]): string {
-  const dTag = tags.find((t) => t[0] === "d")?.[1] ?? "";
-  return `${kind}:${dTag}`;
+  return `${kind}:${replaceableDTag(tags)}`;
 }
 
 /**
@@ -92,17 +109,32 @@ function replaceableCoordinate(kind: number, tags: string[][]): string {
  * publishes that land in the same wall-clock second are a coin flip on
  * whose sha256 sorts lower. `signEvent` stamps `Math.floor(Date.now() /
  * 1000)`, so a set-then-clear within the same second could silently lose.
- * Stamping every replaceable publish with a created_at strictly greater than
- * the last one used for that coordinate removes the tie entirely.
+ *
+ * This map alone is not enough, because it dies with the Raycast command
+ * process: several publishes in one second push created_at seconds into the
+ * future, and a fresh process a second later would stamp a LOWER created_at,
+ * which the relay discards while still answering "accepted". So the map is
+ * only the cheap in-process floor; `BuzzClient.publishSigned` also reads the
+ * event the relay currently stores for the coordinate and stamps strictly
+ * above that. Both floors are combined in `nextCreatedAt`.
  */
 const lastReplaceableCreatedAt = new Map<string, number>();
 
-function nextCreatedAt(kind: number, tags: string[][]): number {
+/**
+ * The created_at to stamp on an outgoing event: now for an ordinary kind, and
+ * for a replaceable one, strictly greater than both the last value this
+ * process used for the coordinate and `storedCreatedAt` (the created_at the
+ * relay currently holds there, when it could be read).
+ */
+function nextCreatedAt(kind: number, tags: string[][], storedCreatedAt?: number): number {
   const now = Math.floor(Date.now() / 1000);
   if (!isReplaceableKind(kind)) return now;
   const key = replaceableCoordinate(kind, tags);
+  const floors = [now];
   const last = lastReplaceableCreatedAt.get(key);
-  const createdAt = last === undefined ? now : Math.max(now, last + 1);
+  if (last !== undefined) floors.push(last + 1);
+  if (storedCreatedAt !== undefined) floors.push(storedCreatedAt + 1);
+  const createdAt = Math.max(...floors);
   lastReplaceableCreatedAt.set(key, createdAt);
   return createdAt;
 }
@@ -117,8 +149,20 @@ export function __resetReplaceableClock(): void {
  * can exercise coordinate isolation (e.g. two different `d` tags on the same
  * kind) without adding a public `BuzzClient` method just to pick one.
  */
-export function __nextReplaceableCreatedAt(kind: number, tags: string[][]): number {
-  return nextCreatedAt(kind, tags);
+export function __nextReplaceableCreatedAt(kind: number, tags: string[][], storedCreatedAt?: number): number {
+  return nextCreatedAt(kind, tags, storedCreatedAt);
+}
+
+/**
+ * The newer of two events, treating an unusable `created_at` as older than any
+ * real timestamp. A plain `b.created_at > a.created_at` comparison is false
+ * against a missing or NaN timestamp, so an event carrying junk would win over
+ * a valid newer one purely by arriving first.
+ */
+function newerEvent(a: NostrEvent, b: NostrEvent): NostrEvent {
+  if (!Number.isFinite(b.created_at)) return a;
+  if (!Number.isFinite(a.created_at)) return b;
+  return b.created_at > a.created_at ? b : a;
 }
 
 async function readRelayError(res: Response): Promise<string> {
@@ -163,7 +207,11 @@ export class BuzzClient {
   }
 
   async listChannels(): Promise<Channel[]> {
-    const events = await this.query([{ kinds: [39000] }]);
+    // The limit is explicit rather than left to the relay's default: channels
+    // and DM conversations share the kind:39000 space, so both queries compete
+    // for the same documented 500-result ceiling. Asking for it outright makes
+    // the truncation point a stated one instead of whatever the relay picks.
+    const events = await this.query([{ kinds: [39000], limit: RELAY_MAX_RESULTS }]);
     // DM conversations are 39000 events too (tagged ["t","dm"]); they are
     // surfaced by listDirectMessages instead, not the regular channel list.
     // A channel with no `d` tag has no usable identifier: it would collide with
@@ -185,14 +233,25 @@ export class BuzzClient {
    * come back short, even to zero: a channel whose fetched window is entirely
    * replies to roots outside that window collapses to an empty `messages` array
    * even though the channel is not empty. `fetchedCount` (the relay's raw event
-   * count before filtering) is what lets a caller tell that case apart from a
-   * truly empty channel, where `fetchedCount` is 0 too. The alternative to the
-   * heuristic is pagination, which the relay's 500 result ceiling limits anyway.
+   * count before the reply filter) is what lets a caller tell that case apart
+   * from a truly empty channel, where `fetchedCount` is 0 too. The alternative
+   * to the heuristic is pagination, which the relay's 500 result ceiling limits
+   * anyway.
    */
   async getMessages(channelId: string, limit = 50): Promise<{ messages: Message[]; fetchedCount: number }> {
-    const events = await this.query([
+    const fetched = await this.query([
       { kinds: [9], "#h": [channelId], limit: Math.min(limit * OVER_FETCH, RELAY_MAX_RESULTS) },
     ]);
+
+    // A relay that echoes an event twice would otherwise produce two rows with
+    // the same React key and count the same reply twice against its root. The
+    // same defensive dedupe listDirectMessages does, for the same reason.
+    const seenIds = new Set<string>();
+    const events = fetched.filter((event) => {
+      if (seenIds.has(event.id)) return false;
+      seenIds.add(event.id);
+      return true;
+    });
 
     const replyCounts = new Map<string, number>();
     for (const event of events) {
@@ -262,7 +321,7 @@ export class BuzzClient {
     const pubkey = getPublicKeyHex(this.secretKey);
     const events = await this.query([{ kinds: [30315], authors: [pubkey], "#d": ["general"], limit: 1 }]);
     if (events.length === 0) return null;
-    const newest = events.reduce((a, b) => (b.created_at > a.created_at ? b : a));
+    const newest = events.reduce(newerEvent);
     const status = { text: newest.content, emoji: tagValue(newest, "emoji") ?? "" };
     return status.text || status.emoji ? status : null;
   }
@@ -312,14 +371,14 @@ export class BuzzClient {
    */
   async listDirectMessages(): Promise<DirectMessage[]> {
     const me = getPublicKeyHex(this.secretKey);
-    const events = await this.query([{ kinds: [39000] }]);
+    const events = await this.query([{ kinds: [39000], limit: RELAY_MAX_RESULTS }]);
 
     const conversations = events
       .filter((event) => isDmChannel(event) && hasParticipant(event, me))
       .map((event) => ({
         channelId: tagValue(event, "d") ?? "",
         participants: event.tags
-          .filter((tag) => tag[0] === "p" && typeof tag[1] === "string" && tag[1] !== me)
+          .filter((tag) => Array.isArray(tag) && tag[0] === "p" && typeof tag[1] === "string" && tag[1] !== me)
           .map((tag) => tag[1]),
       }))
       // Without a `d` tag there is no channel id, so messages would be sent
@@ -375,7 +434,10 @@ export class BuzzClient {
     tags: string[][];
     content: string;
   }): Promise<{ accepted: boolean; message: string }> {
-    const created_at = nextCreatedAt(fields.kind, fields.tags);
+    const stored = isReplaceableKind(fields.kind)
+      ? await this.storedReplaceableCreatedAt(fields.kind, fields.tags)
+      : undefined;
+    const created_at = nextCreatedAt(fields.kind, fields.tags, stored);
     const event = signEvent({ ...fields, created_at }, this.secretKey);
     const result = await this.publish(event);
     if (!result.accepted) {
@@ -388,6 +450,35 @@ export class BuzzClient {
       );
     }
     return result;
+  }
+
+  /**
+   * The `created_at` of the event the relay currently stores for a replaceable
+   * coordinate of ours, or undefined when there is none. Seeding the clock from
+   * the relay is what makes the monotonicity survive a process boundary: the
+   * in-process map above is gone the moment the Raycast command exits, and a
+   * new process that stamped only `now` could land below an event this same
+   * client pushed into the future seconds earlier, which the relay would keep
+   * while still answering "accepted".
+   *
+   * One extra query per replaceable publish; status changes are not a hot path.
+   * A replaceable kind carrying no `d` tag (the 10000-19999 range, which this
+   * client never publishes) simply finds nothing here and falls back to the
+   * in-process floor.
+   */
+  private async storedReplaceableCreatedAt(kind: number, tags: string[][]): Promise<number | undefined> {
+    let events: NostrEvent[];
+    try {
+      events = await this.query([
+        { kinds: [kind], authors: [getPublicKeyHex(this.secretKey)], "#d": [replaceableDTag(tags)], limit: 1 },
+      ]);
+    } catch {
+      // A failed pre-read must not block the publish: the in-process floor
+      // still applies, and the publish itself reports any real relay trouble.
+      return undefined;
+    }
+    const timestamps = events.map((event) => event.created_at).filter((at) => Number.isFinite(at));
+    return timestamps.length === 0 ? undefined : Math.max(...timestamps);
   }
 
   private async post(path: string, body: unknown): Promise<unknown> {

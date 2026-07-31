@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { createHash } from "node:crypto";
 import { BuzzClient, RelayError, __resetReplaceableClock, __nextReplaceableCreatedAt } from "./buzz-client";
 import { parseSecretKey, signEvent, getPublicKeyHex } from "./nostr";
 import type { NostrEvent } from "./types";
@@ -7,6 +8,25 @@ const SK = parseSecretKey("00000000000000000000000000000000000000000000000000000
 const fetchMock = () => globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
 
 afterEach(() => vi.unstubAllGlobals());
+
+/**
+ * The error a rejected promise settles with, so a test can assert the WHOLE
+ * message. `rejects.toThrow("...")` only substring-matches, which lets an
+ * added prefix or suffix (an untruncated relay body, for instance) survive.
+ */
+async function rejection(promise: Promise<unknown>): Promise<Error> {
+  return promise.then(
+    () => {
+      throw new Error("expected the promise to reject, but it resolved");
+    },
+    (err: Error) => err,
+  );
+}
+
+/** A tag the relay sent as a bare string instead of an array. */
+function stringTag(value: string): string[] {
+  return value as unknown as string[];
+}
 
 /**
  * A client whose fetch is stubbed to answer a sequence of POST calls in order,
@@ -66,6 +86,52 @@ describe("BuzzClient.query", () => {
     expect(JSON.parse(init.body as string)).toEqual([{ kinds: [39000] }]);
   });
 
+  it("signs the NIP-98 header for exactly the request it sends", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("[]", { status: 200 })),
+    );
+    const client = new BuzzClient("https://relay.test", SK);
+    // A non-ASCII search term, so the payload hash is only right if the header
+    // hashes the very bytes the body carries.
+    await client.query([{ kinds: [9], search: "café \u{1F4C5}" }]);
+
+    const [url, init] = fetchMock().mock.calls[0];
+    const header: string = (init.headers as Record<string, string>).Authorization;
+    expect(header.startsWith("Nostr ")).toBe(true);
+    const auth = JSON.parse(Buffer.from(header.slice("Nostr ".length), "base64").toString("utf8")) as NostrEvent;
+    const authTag = (name: string) => auth.tags.find((t) => t[0] === name)?.[1];
+
+    // The header must describe the request that actually carries it: a `u`,
+    // `method` or `payload` that drifts from the real call 401s every request
+    // while a header-shape-only assertion stays green.
+    expect(auth.kind).toBe(27235);
+    expect(authTag("u")).toBe(url);
+    expect(authTag("method")).toBe(init.method);
+    expect(authTag("payload")).toBe(
+      createHash("sha256")
+        .update(init.body as string, "utf8")
+        .digest("hex"),
+    );
+    // NIP-98 created_at is in seconds; milliseconds would be ~1000x too large.
+    expect(Math.abs(auth.created_at - Math.floor(Date.now() / 1000))).toBeLessThanOrEqual(5);
+  });
+
+  it("signs the /events URL, not the /query one, when publishing", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ accepted: true }), { status: 200 })),
+    );
+    const client = new BuzzClient("https://relay.test", SK);
+    await client.publish(signEvent({ kind: 9, created_at: 1700000000, tags: [], content: "hi" }, SK));
+
+    const [url, init] = fetchMock().mock.calls[0];
+    const header: string = (init.headers as Record<string, string>).Authorization;
+    const auth = JSON.parse(Buffer.from(header.slice("Nostr ".length), "base64").toString("utf8")) as NostrEvent;
+    expect(url).toBe("https://relay.test/events");
+    expect(auth.tags.find((t) => t[0] === "u")?.[1]).toBe("https://relay.test/events");
+  });
+
   it("strips a trailing slash from the relay URL", async () => {
     vi.stubGlobal(
       "fetch",
@@ -117,7 +183,10 @@ describe("BuzzClient.query", () => {
       vi.fn(async () => new Response("", { status: 500 })),
     );
     const client = new BuzzClient("https://relay.test", SK);
-    await expect(client.query([{ kinds: [9] }])).rejects.toThrow("Relay rejected the request (status 500)");
+    // Whole-message equality, not toThrow's substring match: a stray ": " or a
+    // detail appended to the end has to fail a test whose name says "omits".
+    const err = await rejection(client.query([{ kinds: [9] }]));
+    expect(err.message).toBe("Relay rejected the request (status 500)");
   });
 
   it("still reports the status when the error body cannot be read", async () => {
@@ -132,7 +201,8 @@ describe("BuzzClient.query", () => {
       })),
     );
     const client = new BuzzClient("https://relay.test", SK);
-    await expect(client.query([{ kinds: [9] }])).rejects.toThrow("Relay rejected the request (status 502)");
+    const err = await rejection(client.query([{ kinds: [9] }]));
+    expect(err.message).toBe("Relay rejected the request (status 502)");
   });
 
   it("uses a non-JSON error body verbatim", async () => {
@@ -141,16 +211,30 @@ describe("BuzzClient.query", () => {
       vi.fn(async () => new Response("upstream timeout", { status: 504 })),
     );
     const client = new BuzzClient("https://relay.test", SK);
-    await expect(client.query([{ kinds: [9] }])).rejects.toThrow(/upstream timeout/);
+    const err = await rejection(client.query([{ kinds: [9] }]));
+    expect(err.message).toBe("Relay rejected the request (status 504): upstream timeout");
   });
 
-  it("bounds a long relay error body", async () => {
+  it("bounds a long JSON relay error to 200 characters", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(JSON.stringify({ error: "x".repeat(500) }), { status: 400 })),
     );
     const client = new BuzzClient("https://relay.test", SK);
-    await expect(client.query([{ kinds: [9] }])).rejects.toThrow(/x{200}(?!x)/);
+    // Asserting the whole message pins the length: a regex for 200 x's also
+    // matches an untruncated 500-character one.
+    const err = await rejection(client.query([{ kinds: [9] }]));
+    expect(err.message).toBe(`Relay rejected the request (status 400): ${"x".repeat(200)}`);
+  });
+
+  it("bounds a long non-JSON relay error to 200 characters", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("y".repeat(500), { status: 400 })),
+    );
+    const client = new BuzzClient("https://relay.test", SK);
+    const err = await rejection(client.query([{ kinds: [9] }]));
+    expect(err.message).toBe(`Relay rejected the request (status 400): ${"y".repeat(200)}`);
   });
 
   it("ignores a JSON error body whose error field is not a string", async () => {
@@ -221,8 +305,17 @@ describe("BuzzClient.listChannels", () => {
       }),
     ]);
     const channels = await client.listChannels();
-    expect(qSpy).toHaveBeenCalledWith([{ kinds: [39000] }]);
+    expect(qSpy).toHaveBeenCalledWith([{ kinds: [39000], limit: 500 }]);
     expect(channels).toEqual([{ id: "uuid-1", name: "general", about: "the main room" }]);
+  });
+
+  it("asks for the relay's documented 500-result ceiling explicitly", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    const qSpy = vi.spyOn(client, "query").mockResolvedValue([]);
+    await client.listChannels();
+    // Channels and DM conversations share the kind:39000 space, so an
+    // unlimited query silently competes with listDirectMessages for the ceiling.
+    expect((qSpy.mock.calls[0][0][0] as { limit?: number }).limit).toBe(500);
   });
 
   it("keeps an identified channel that carries no name or about tag", async () => {
@@ -269,6 +362,44 @@ describe("BuzzClient.listChannels", () => {
     ]);
     const channels = await client.listChannels();
     expect(channels.map((c) => c.id)).toEqual(["normal-channel"]);
+  });
+
+  it("keeps a channel whose t tag is an ordinary topic rather than dm", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    // The DM test above only proves the tag NAME is read. Without checking the
+    // VALUE too, any channel carrying a topic tag is taken for a DM and
+    // disappears from the channel list into a phantom conversation.
+    vi.spyOn(client, "query").mockResolvedValue([
+      ev({
+        kind: 39000,
+        tags: [
+          ["d", "topical-channel"],
+          ["name", "announcements"],
+          ["t", "announcements"],
+        ],
+      }),
+    ]);
+    expect((await client.listChannels()).map((c) => c.id)).toEqual(["topical-channel"]);
+  });
+
+  it("reads the real d tag past a valueless one", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    // Live Buzz 39000 events carry valueless tags; a valueless `d` that
+    // shadowed the real one would resolve the id to "" and drop the channel.
+    vi.spyOn(client, "query").mockResolvedValue([
+      ev({ kind: 39000, tags: [["d"], ["d", "real-id"], ["name", "General"]] }),
+    ]);
+    expect(await client.listChannels()).toEqual([{ id: "real-id", name: "General", about: undefined }]);
+  });
+
+  it("ignores a tag the relay sent as a bare string", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    // "dinner"[0] === "d" and "dinner"[1] === "i", so an unguarded lookup reads
+    // the string character by character and gives this channel the id "i".
+    vi.spyOn(client, "query").mockResolvedValue([
+      ev({ kind: 39000, tags: [stringTag("dinner"), ["d", "real-id"], ["name", "General"]] }),
+    ]);
+    expect(await client.listChannels()).toEqual([{ id: "real-id", name: "General", about: undefined }]);
   });
 });
 
@@ -417,6 +548,56 @@ describe("BuzzClient.getMessages thread collapsing", () => {
     ]);
     expect((await client.getMessages("chan")).messages.map((m) => m.id)).toEqual(["new", "old"]);
   });
+
+  it("orders messages sharing a created_at by id, so a limit boundary is stable", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    // Buzz stamps whole seconds, so ties are ordinary. Fed in descending id
+    // order: without a tie-break a stable sort would hand them back unchanged.
+    vi.spyOn(client, "query").mockResolvedValue([
+      ev({ id: "m-c", kind: 9, created_at: 42, content: "c", tags: [["h", "chan"]] }),
+      ev({ id: "m-b", kind: 9, created_at: 42, content: "b", tags: [["h", "chan"]] }),
+      ev({ id: "m-a", kind: 9, created_at: 42, content: "a", tags: [["h", "chan"]] }),
+    ]);
+    expect((await client.getMessages("chan")).messages.map((m) => m.id)).toEqual(["m-a", "m-b", "m-c"]);
+  });
+
+  it("counts a nested reply against the thread root rather than its parent", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    // A genuine nested thread, where root and parent differ: R is the root, A
+    // replies to R, and B replies to A. Both replies belong to R's count.
+    const nested = (id: string, rootId: string, parentId: string) =>
+      ev({
+        id,
+        kind: 9,
+        created_at: 50,
+        content: "a reply",
+        tags: [
+          ["h", "chan"],
+          ["e", rootId, "", "root"],
+          ["e", parentId, "", "reply"],
+        ],
+      });
+    vi.spyOn(client, "query").mockResolvedValue([
+      ev({ id: ROOT, kind: 9, created_at: 10, content: "the question", tags: [["h", "chan"]] }),
+      nested("reply-a", ROOT, ROOT),
+      nested("reply-b", ROOT, "reply-a"),
+    ]);
+    const { messages: msgs } = await client.getMessages("chan");
+    expect(msgs.map((m) => m.id)).toEqual([ROOT]);
+    expect(msgs[0].replyCount).toBe(2);
+  });
+
+  it("dedupes an event the relay echoed twice", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    // A duplicate would otherwise become a duplicate React key downstream and
+    // count twice against its root.
+    const duplicate = ev({ id: ROOT, kind: 9, created_at: 10, content: "the question", tags: [["h", "chan"]] });
+    const echoedReply = reply("r1", ROOT);
+    vi.spyOn(client, "query").mockResolvedValue([duplicate, duplicate, echoedReply, echoedReply]);
+    const { messages: msgs } = await client.getMessages("chan");
+    expect(msgs.map((m) => m.id)).toEqual([ROOT]);
+    expect(msgs[0].replyCount).toBe(1);
+  });
 });
 
 describe("BuzzClient message mapping", () => {
@@ -447,7 +628,38 @@ describe("BuzzClient.searchMessages", () => {
     expect(qSpy).toHaveBeenCalledWith([{ search: "hello", kinds: [9], limit: 25 }]);
     expect(msgs[0]).toMatchObject({ content: "hello world", channelId: "chan" });
   });
+
+  it("returns hits newest first whatever order the relay used", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    vi.spyOn(client, "query").mockResolvedValue([
+      ev({ id: "old", pubkey: "a", created_at: 5, kind: 9, tags: [["h", "chan"]], content: "hello old" }),
+      ev({ id: "new", pubkey: "a", created_at: 90, kind: 9, tags: [["h", "chan"]], content: "hello new" }),
+    ]);
+    expect((await client.searchMessages("hello")).map((m) => m.id)).toEqual(["new", "old"]);
+  });
+
+  it("orders hits sharing a created_at by id", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    vi.spyOn(client, "query").mockResolvedValue([
+      ev({ id: "s-b", pubkey: "a", created_at: 7, kind: 9, tags: [["h", "chan"]], content: "hello b" }),
+      ev({ id: "s-a", pubkey: "a", created_at: 7, kind: 9, tags: [["h", "chan"]], content: "hello a" }),
+    ]);
+    expect((await client.searchMessages("hello")).map((m) => m.id)).toEqual(["s-a", "s-b"]);
+  });
 });
+
+/**
+ * A client with both relay calls stubbed: `publish` to capture the signed
+ * event, and `query` because publishing a replaceable kind first reads the
+ * event the relay already stores for that coordinate. `stored` is what that
+ * pre-read finds.
+ */
+function writeClient(stored: NostrEvent[] = []) {
+  const client = new BuzzClient("https://relay.test", SK);
+  const qSpy = vi.spyOn(client, "query").mockResolvedValue(stored);
+  const pSpy = vi.spyOn(client, "publish").mockResolvedValue({ accepted: true, message: "" });
+  return { client, qSpy, pSpy };
+}
 
 describe("BuzzClient write helpers", () => {
   it("sendMessage publishes a signed kind:9 with an h tag", async () => {
@@ -473,8 +685,7 @@ describe("BuzzClient write helpers", () => {
   });
 
   it("puts the emoji in an emoji tag rather than concatenating it into the content", async () => {
-    const client = new BuzzClient("https://relay.test", SK);
-    const pSpy = vi.spyOn(client, "publish").mockResolvedValue({ accepted: true, message: "" });
+    const { client, pSpy } = writeClient();
     await client.setStatus("in a meeting", "\u{1F4C5}");
     const published = pSpy.mock.calls[0][0];
     expect(published.kind).toBe(30315);
@@ -484,8 +695,7 @@ describe("BuzzClient write helpers", () => {
   });
 
   it("omits the emoji tag entirely when no emoji is given", async () => {
-    const client = new BuzzClient("https://relay.test", SK);
-    const pSpy = vi.spyOn(client, "publish").mockResolvedValue({ accepted: true, message: "" });
+    const { client, pSpy } = writeClient();
     await client.setStatus("heads down");
     const published = pSpy.mock.calls[0][0];
     expect(published.content).toBe("heads down");
@@ -493,15 +703,13 @@ describe("BuzzClient write helpers", () => {
   });
 
   it("treats a blank emoji as no emoji", async () => {
-    const client = new BuzzClient("https://relay.test", SK);
-    const pSpy = vi.spyOn(client, "publish").mockResolvedValue({ accepted: true, message: "" });
+    const { client, pSpy } = writeClient();
     await client.setStatus("heads down", "   ");
     expect(pSpy.mock.calls[0][0].tags.some((t) => t[0] === "emoji")).toBe(false);
   });
 
   it("trims the status text and the emoji", async () => {
-    const client = new BuzzClient("https://relay.test", SK);
-    const pSpy = vi.spyOn(client, "publish").mockResolvedValue({ accepted: true, message: "" });
+    const { client, pSpy } = writeClient();
     await client.setStatus("  heads down  ", "  \u{1F9E0}  ");
     const published = pSpy.mock.calls[0][0];
     expect(published.content).toBe("heads down");
@@ -509,8 +717,7 @@ describe("BuzzClient write helpers", () => {
   });
 
   it("clearStatus publishes empty content with no emoji tag", async () => {
-    const client = new BuzzClient("https://relay.test", SK);
-    const pSpy = vi.spyOn(client, "publish").mockResolvedValue({ accepted: true, message: "" });
+    const { client, pSpy } = writeClient();
     await client.clearStatus();
     const published = pSpy.mock.calls[0][0];
     expect(published.kind).toBe(30315);
@@ -546,6 +753,13 @@ describe("BuzzClient write helpers", () => {
     const client = new BuzzClient("https://relay.test", SK);
     vi.spyOn(client, "publish").mockResolvedValue({ accepted: false, message: "" });
     await expect(client.sendMessage("chan", "x")).rejects.toThrow(/auth or permission/);
+  });
+
+  it("bounds a long rejection reason to 200 characters", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    vi.spyOn(client, "publish").mockResolvedValue({ accepted: false, message: "z".repeat(500) });
+    const err = await rejection(client.sendMessage("chan", "x"));
+    expect(err.message).toBe(`Relay rejected the request: ${"z".repeat(200)}`);
   });
 });
 
@@ -631,6 +845,37 @@ describe("BuzzClient.getStatus", () => {
     ]);
     expect(await client.getStatus()).toEqual({ text: "new", emoji: "" });
   });
+
+  it("reads the real emoji tag past a valueless one", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    // A valueless `emoji` tag shadowing the real one would report no emoji.
+    vi.spyOn(client, "query").mockResolvedValue([
+      ev({ kind: 30315, created_at: 10, content: "in a meeting", tags: [["d", "general"], ["emoji"], ["emoji", "X"]] }),
+    ]);
+    expect(await client.getStatus()).toEqual({ text: "in a meeting", emoji: "X" });
+  });
+
+  it("prefers a valid event over one whose created_at is missing", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    // `undefined > number` and `number > undefined` are both false, so a junk
+    // timestamp arriving first would win the comparison by default.
+    const junk = { ...ev({ kind: 30315, content: "junk", tags: [["d", "general"]] }), created_at: undefined };
+    vi.spyOn(client, "query").mockResolvedValue([
+      junk as unknown as NostrEvent,
+      ev({ kind: 30315, created_at: 10, content: "real", tags: [["d", "general"]] }),
+    ]);
+    expect(await client.getStatus()).toEqual({ text: "real", emoji: "" });
+  });
+
+  it("prefers a valid event over one whose created_at is missing, in either order", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    const junk = { ...ev({ kind: 30315, content: "junk", tags: [["d", "general"]] }), created_at: undefined };
+    vi.spyOn(client, "query").mockResolvedValue([
+      ev({ kind: 30315, created_at: 10, content: "real", tags: [["d", "general"]] }),
+      junk as unknown as NostrEvent,
+    ]);
+    expect(await client.getStatus()).toEqual({ text: "real", emoji: "" });
+  });
 });
 
 // Regression coverage for a bug the live smoke test caught: the relay
@@ -638,12 +883,16 @@ describe("BuzzClient.getStatus", () => {
 // replaceable coordinate by keeping the event with the LOWEST id, so a
 // set-then-clear within the same wall-clock second was effectively a coin
 // flip on whose sha256 sorted lower. Publishing a replaceable kind must stamp
-// a created_at that is strictly greater than the last one this process used
-// for that coordinate.
+// a created_at that is strictly greater than both the last one this process
+// used for that coordinate and the one the relay already stores there: the
+// in-process value alone dies with the Raycast command process.
 describe("BuzzClient replaceable created_at monotonicity", () => {
+  const NOW_MS = 1_700_000_000_000;
+  const NOW_S = 1_700_000_000;
+
   beforeEach(() => {
     vi.useFakeTimers();
-    vi.setSystemTime(1_700_000_000_000);
+    vi.setSystemTime(NOW_MS);
     __resetReplaceableClock();
   });
 
@@ -652,9 +901,12 @@ describe("BuzzClient replaceable created_at monotonicity", () => {
     vi.useRealTimers();
   });
 
+  function storedStatus(created_at: number): NostrEvent {
+    return ev({ kind: 30315, created_at, content: "stored", tags: [["d", "general"]] });
+  }
+
   it("gives two setStatus calls in the same second strictly increasing created_at", async () => {
-    const client = new BuzzClient("https://relay.test", SK);
-    const pSpy = vi.spyOn(client, "publish").mockResolvedValue({ accepted: true, message: "" });
+    const { client, pSpy } = writeClient();
     await client.setStatus("first");
     await client.setStatus("second");
     const [firstAt, secondAt] = pSpy.mock.calls.map((c) => c[0].created_at);
@@ -662,8 +914,7 @@ describe("BuzzClient replaceable created_at monotonicity", () => {
   });
 
   it("gives a clearStatus that follows setStatus in the same second a strictly increasing created_at", async () => {
-    const client = new BuzzClient("https://relay.test", SK);
-    const pSpy = vi.spyOn(client, "publish").mockResolvedValue({ accepted: true, message: "" });
+    const { client, pSpy } = writeClient();
     await client.setStatus("in a meeting");
     await client.clearStatus();
     const [setAt, clearAt] = pSpy.mock.calls.map((c) => c[0].created_at);
@@ -671,13 +922,68 @@ describe("BuzzClient replaceable created_at monotonicity", () => {
   });
 
   it("uses the real current time once it has caught up, instead of drifting ahead forever", async () => {
-    const client = new BuzzClient("https://relay.test", SK);
-    const pSpy = vi.spyOn(client, "publish").mockResolvedValue({ accepted: true, message: "" });
+    const { client, pSpy } = writeClient();
     await client.setStatus("first");
     vi.setSystemTime(1_700_000_010_000); // 10 real seconds later
     await client.setStatus("second");
     const [firstAt, secondAt] = pSpy.mock.calls.map((c) => c[0].created_at);
     expect(secondAt).toBe(firstAt + 10);
+  });
+
+  it("reads the stored event for the coordinate before publishing a replaceable kind", async () => {
+    const { client, qSpy } = writeClient();
+    await client.setStatus("first");
+    expect(qSpy).toHaveBeenCalledWith([{ kinds: [30315], authors: [ownPubkey()], "#d": ["general"], limit: 1 }]);
+  });
+
+  it("does not read anything before publishing a non-replaceable kind", async () => {
+    const { client, qSpy } = writeClient();
+    await client.sendMessage("chan", "hello");
+    expect(qSpy).not.toHaveBeenCalled();
+  });
+
+  it("outruns an event the relay stores in the future after the process restarted", async () => {
+    const { client, qSpy, pSpy } = writeClient();
+    // Five rapid status changes in one wall-clock second, which the Set Status
+    // command really can produce; the last is stamped four seconds ahead.
+    for (const text of ["one", "two", "three", "four", "five"]) {
+      await client.setStatus(text);
+    }
+    const lastAt = pSpy.mock.calls[4][0].created_at;
+    expect(lastAt).toBe(NOW_S + 4);
+
+    // The Raycast command process ends, taking the in-process clock with it,
+    // and one real second passes. The relay still holds that future event, so
+    // stamping plain "now" here would publish something OLDER than what the
+    // relay stores: it would keep the stale status and still answer "accepted".
+    __resetReplaceableClock();
+    vi.setSystemTime(NOW_MS + 1_000);
+    qSpy.mockResolvedValue([storedStatus(lastAt)]);
+    await client.setStatus("after the restart");
+
+    expect(pSpy.mock.calls[5][0].created_at).toBeGreaterThan(lastAt);
+  });
+
+  it("publishes anyway when the stored-event read fails", async () => {
+    const { client, qSpy, pSpy } = writeClient();
+    qSpy.mockRejectedValue(new RelayError("Cannot reach relay at https://relay.test"));
+    await client.setStatus("first");
+    // The publish itself reports any real relay trouble; a failed pre-read
+    // must not block a status change.
+    expect(pSpy.mock.calls[0][0].created_at).toBe(NOW_S);
+  });
+
+  it("ignores a stored event whose created_at is unusable", async () => {
+    const junk = { ...storedStatus(0), created_at: undefined } as unknown as NostrEvent;
+    const { client, pSpy } = writeClient([junk]);
+    await client.setStatus("first");
+    expect(pSpy.mock.calls[0][0].created_at).toBe(NOW_S);
+  });
+
+  it("stamps above the newest stored event when the relay returns several", async () => {
+    const { client, pSpy } = writeClient([storedStatus(NOW_S + 30), storedStatus(NOW_S + 90)]);
+    await client.setStatus("first");
+    expect(pSpy.mock.calls[0][0].created_at).toBe(NOW_S + 91);
   });
 
   it("tracks separate d tags on the same kind independently", () => {
@@ -693,14 +999,22 @@ describe("BuzzClient replaceable created_at monotonicity", () => {
   it("falls back to an empty d tag for a replaceable kind that carries none", () => {
     // Kind 15000 sits in the 10000-19999 (non-parameterized) replaceable
     // range, which never carries a d tag; the coordinate key still has to
-    // resolve without one.
+    // resolve without one. Two calls, because a single one answers "now"
+    // whether or not the kind is treated as replaceable at all.
     const nowSeconds = Math.floor(Date.now() / 1000);
-    expect(__nextReplaceableCreatedAt(15000, [])).toBe(nowSeconds);
+    const first = __nextReplaceableCreatedAt(15000, []);
+    const second = __nextReplaceableCreatedAt(15000, []);
+    expect(first).toBe(nowSeconds);
+    expect(second).toBeGreaterThan(first);
+  });
+
+  it("stamps above an explicitly supplied stored created_at", () => {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    expect(__nextReplaceableCreatedAt(30315, [["d", "general"]], nowSeconds + 60)).toBe(nowSeconds + 61);
   });
 
   it("does not bump a non-replaceable kind: two kind:9 messages in the same second share created_at", async () => {
-    const client = new BuzzClient("https://relay.test", SK);
-    const pSpy = vi.spyOn(client, "publish").mockResolvedValue({ accepted: true, message: "" });
+    const { client, pSpy } = writeClient();
     await client.sendMessage("chan", "one");
     await client.sendMessage("chan", "two");
     const [firstAt, secondAt] = pSpy.mock.calls.map((c) => c[0].created_at);
@@ -708,8 +1022,7 @@ describe("BuzzClient replaceable created_at monotonicity", () => {
   });
 
   it("resets cleanly between tests via __resetReplaceableClock", async () => {
-    const client = new BuzzClient("https://relay.test", SK);
-    const pSpy = vi.spyOn(client, "publish").mockResolvedValue({ accepted: true, message: "" });
+    const { client, pSpy } = writeClient();
     await client.setStatus("first");
     __resetReplaceableClock();
     await client.setStatus("second");
@@ -739,8 +1052,10 @@ describe("lookupProfiles", () => {
   });
 
   it("keeps the newest profile when an author has several", async () => {
+    // Newest first, so plain last-write-wins would answer "old": the fixture
+    // has to be out of order for this test to say anything.
     const { client } = clientWithResponses([
-      [profileEvent("dd".repeat(32), '{"name":"old"}', 10), profileEvent("dd".repeat(32), '{"name":"new"}', 20)],
+      [profileEvent("dd".repeat(32), '{"name":"new"}', 20), profileEvent("dd".repeat(32), '{"name":"old"}', 10)],
     ]);
     const names = await client.lookupProfiles(["dd".repeat(32)]);
     expect(names.get("dd".repeat(32))).toBe("new");
@@ -762,7 +1077,7 @@ describe("listDirectMessages", () => {
     ]);
     const dms = await client.listDirectMessages();
 
-    expect(calls[0].body).toEqual([{ kinds: [39000] }]);
+    expect(calls[0].body).toEqual([{ kinds: [39000], limit: 500 }]);
     expect(dms).toEqual([{ channelId: "chan-1", participants: ["aa".repeat(32)], name: "Ada" }]);
   });
 
@@ -878,6 +1193,52 @@ describe("listDirectMessages", () => {
     const { client } = clientWithResponses([[normalChannel]]);
     const dms = await client.listDirectMessages();
     expect(dms).toEqual([]);
+  });
+
+  it("ignores a 39000 channel whose t tag is an ordinary topic", async () => {
+    const me = ownPubkey();
+    // The mirror of the channel-list case: a topic tag is not a DM tag, so this
+    // channel must not turn up as a phantom conversation. A real DM alongside
+    // it, so dropping the value check produces a wrong LIST rather than merely
+    // exhausting the queued fixtures.
+    const topical: NostrEvent = {
+      ...dmEvent("chan-topic", [me]),
+      tags: [
+        ["d", "chan-topic"],
+        ["name", "announcements"],
+        ["t", "announcements"],
+        ["p", me],
+      ],
+    };
+    const { client } = clientWithResponses([[topical, dmEvent("chan-real", [me])]]);
+    const dms = await client.listDirectMessages();
+    expect(dms.map((d) => d.channelId)).toEqual(["chan-real"]);
+  });
+
+  it("reads the real d tag past a valueless one", async () => {
+    const me = ownPubkey();
+    const shadowed: NostrEvent = {
+      ...dmEvent("chan-14", [me, "aa".repeat(32)]),
+      tags: [["d"], ["d", "chan-14"], ["t", "dm"], ["p", me], ["p", "aa".repeat(32)]],
+    };
+    const { client } = clientWithResponses([[shadowed], [profileEvent("aa".repeat(32), '{"name":"Ada"}')]]);
+    const dms = await client.listDirectMessages();
+    // A valueless `d` shadowing the real one empties the channel id, which
+    // drops the whole conversation from the list.
+    expect(dms).toEqual([{ channelId: "chan-14", participants: ["aa".repeat(32)], name: "Ada" }]);
+  });
+
+  it("ignores a tag the relay sent as a bare string", async () => {
+    const me = ownPubkey();
+    // "private"[0] === "p" and "private"[1] === "r", so an unguarded read adds a
+    // phantom participant "r" and titles the row "r".
+    const withStringTag: NostrEvent = {
+      ...dmEvent("chan-15", [me, "aa".repeat(32)]),
+      tags: [stringTag("private"), ["d", "chan-15"], ["t", "dm"], ["p", me], ["p", "aa".repeat(32)]],
+    };
+    const { client } = clientWithResponses([[withStringTag], [profileEvent("aa".repeat(32), '{"name":"Ada"}')]]);
+    const dms = await client.listDirectMessages();
+    expect(dms).toEqual([{ channelId: "chan-15", participants: ["aa".repeat(32)], name: "Ada" }]);
   });
 
   it("handles a DM channel carrying valueless tags without throwing", async () => {
