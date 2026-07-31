@@ -1,12 +1,53 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { BuzzClient, RelayError, __resetReplaceableClock, __nextReplaceableCreatedAt } from "./buzz-client";
-import { parseSecretKey, signEvent } from "./nostr";
+import { parseSecretKey, signEvent, getPublicKeyHex } from "./nostr";
 import type { NostrEvent } from "./types";
 
 const SK = parseSecretKey("0000000000000000000000000000000000000000000000000000000000000001");
 const fetchMock = () => globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
 
 afterEach(() => vi.unstubAllGlobals());
+
+/**
+ * A client whose fetch is stubbed to answer a sequence of POST calls in order,
+ * one response per call. A response that is an array is returned as-is (the
+ * `/query` shape); an object is returned as-is too (the `/events` shape).
+ * `calls` records each call's parsed JSON body, in order, for assertions.
+ */
+function clientWithResponses(responses: unknown[]): { client: BuzzClient; calls: { body: unknown }[] } {
+  const calls: { body: unknown }[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (_url: string, init: RequestInit) => {
+      const body: unknown = JSON.parse(init.body as string);
+      calls.push({ body });
+      const response = responses[calls.length - 1];
+      return new Response(JSON.stringify(response), { status: 200 });
+    }),
+  );
+  const client = new BuzzClient("https://relay.test", SK);
+  return { client, calls };
+}
+
+function ownPubkey(): string {
+  return getPublicKeyHex(SK);
+}
+
+function profileEvent(pubkey: string, content: string, created_at = 1000): NostrEvent {
+  return { id: `${pubkey}-${created_at}`, pubkey, created_at, kind: 0, tags: [], content, sig: "s" };
+}
+
+function dmEvent(channelId: string, participants: string[]): NostrEvent {
+  return {
+    id: channelId,
+    pubkey: participants[0],
+    created_at: 1000,
+    kind: 41001,
+    tags: [["d", channelId], ...participants.map((p) => ["p", p])],
+    content: "",
+    sig: "s",
+  };
+}
 
 describe("BuzzClient.query", () => {
   it("posts filters as a JSON array to /query with a NIP-98 header", async () => {
@@ -653,5 +694,144 @@ describe("BuzzClient replaceable created_at monotonicity", () => {
     // Without the reset, the second call would be bumped ahead of the first;
     // a clean reset makes it start over at the current simulated time.
     expect(secondAt).toBe(firstAt);
+  });
+});
+
+describe("lookupProfiles", () => {
+  it("queries kind:0 for the given authors and maps names", async () => {
+    const { client, calls } = clientWithResponses([
+      [profileEvent("aa".repeat(32), '{"display_name":"Ada"}'), profileEvent("bb".repeat(32), '{"name":"bot"}')],
+    ]);
+    const names = await client.lookupProfiles(["aa".repeat(32), "bb".repeat(32)]);
+
+    expect(calls[0].body).toEqual([{ kinds: [0], authors: ["aa".repeat(32), "bb".repeat(32)] }]);
+    expect(names.get("aa".repeat(32))).toBe("Ada");
+    expect(names.get("bb".repeat(32))).toBe("bot");
+  });
+
+  it("omits authors whose profile carries no usable name", async () => {
+    const { client } = clientWithResponses([[profileEvent("cc".repeat(32), "{}")]]);
+    const names = await client.lookupProfiles(["cc".repeat(32)]);
+    expect(names.has("cc".repeat(32))).toBe(false);
+  });
+
+  it("keeps the newest profile when an author has several", async () => {
+    const { client } = clientWithResponses([
+      [profileEvent("dd".repeat(32), '{"name":"old"}', 10), profileEvent("dd".repeat(32), '{"name":"new"}', 20)],
+    ]);
+    const names = await client.lookupProfiles(["dd".repeat(32)]);
+    expect(names.get("dd".repeat(32))).toBe("new");
+  });
+
+  it("does not touch the relay for an empty author list", async () => {
+    const { client, calls } = clientWithResponses([]);
+    expect(await client.lookupProfiles([])).toEqual(new Map());
+    expect(calls).toHaveLength(0);
+  });
+});
+
+describe("listDirectMessages", () => {
+  it("lists conversations, naming them by the other participants", async () => {
+    const me = ownPubkey();
+    const { client, calls } = clientWithResponses([
+      [dmEvent("chan-1", [me, "aa".repeat(32)])],
+      [profileEvent("aa".repeat(32), '{"display_name":"Ada"}')],
+    ]);
+    const dms = await client.listDirectMessages();
+
+    expect(calls[0].body).toEqual([{ kinds: [41001], "#p": [me] }]);
+    expect(dms).toEqual([{ channelId: "chan-1", participants: ["aa".repeat(32)], name: "Ada" }]);
+  });
+
+  it("falls back to a shortened pubkey when a participant has no profile", async () => {
+    const me = ownPubkey();
+    const { client } = clientWithResponses([[dmEvent("chan-2", [me, "ab".repeat(32)])], []]);
+    const dms = await client.listDirectMessages();
+    expect(dms[0].name).toBe("abababab");
+  });
+
+  it("joins several other participants into one name", async () => {
+    const me = ownPubkey();
+    const { client } = clientWithResponses([
+      [dmEvent("chan-3", [me, "aa".repeat(32), "bb".repeat(32)])],
+      [profileEvent("aa".repeat(32), '{"name":"Ada"}'), profileEvent("bb".repeat(32), '{"name":"Bo"}')],
+    ]);
+    const dms = await client.listDirectMessages();
+    expect(dms[0].name).toBe("Ada, Bo");
+    expect(dms[0].participants).toEqual(["aa".repeat(32), "bb".repeat(32)]);
+  });
+
+  it("names a conversation with nobody else 'Direct message'", async () => {
+    const me = ownPubkey();
+    const { client } = clientWithResponses([[dmEvent("chan-4", [me])]]);
+    const dms = await client.listDirectMessages();
+    expect(dms[0]).toEqual({ channelId: "chan-4", participants: [], name: "Direct message" });
+  });
+
+  it("drops a conversation with no d tag, which has no usable channel id", async () => {
+    const me = ownPubkey();
+    const { client } = clientWithResponses([
+      [{ ...dmEvent("chan-5", [me]), tags: [["p", me]] }, dmEvent("chan-6", [me])],
+    ]);
+    const dms = await client.listDirectMessages();
+    expect(dms.map((d) => d.channelId)).toEqual(["chan-6"]);
+  });
+
+  it("asks for each other participant's profile exactly once", async () => {
+    const me = ownPubkey();
+    const { client, calls } = clientWithResponses([
+      [dmEvent("chan-7", [me, "aa".repeat(32)]), dmEvent("chan-8", [me, "aa".repeat(32)])],
+      [profileEvent("aa".repeat(32), '{"name":"Ada"}')],
+    ]);
+    await client.listDirectMessages();
+    expect(calls[1].body).toEqual([{ kinds: [0], authors: ["aa".repeat(32)] }]);
+  });
+
+  it("does not look up profiles when there is nobody to name", async () => {
+    const { client, calls } = clientWithResponses([[]]);
+    expect(await client.listDirectMessages()).toEqual([]);
+    expect(calls).toHaveLength(1);
+  });
+});
+
+describe("openDirectMessage", () => {
+  it("publishes kind 41010 with a p tag and a generated d tag", async () => {
+    const { client, calls } = clientWithResponses([
+      { accepted: true, message: 'response:{"channel_id":"relay-id","created":true}' },
+    ]);
+    const channelId = await client.openDirectMessage("ee".repeat(32));
+
+    const event = calls[0].body as NostrEvent;
+    expect(event.kind).toBe(41010);
+    expect(event.content).toBe("");
+    expect(event.tags[0]).toEqual(["p", "ee".repeat(32)]);
+    expect(event.tags[1][0]).toBe("d");
+    expect(event.tags[1][1]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(channelId).toBe("relay-id");
+  });
+
+  it("returns the id we generated when the relay does not echo one", async () => {
+    const { client, calls } = clientWithResponses([{ accepted: true, message: "ok" }]);
+    const channelId = await client.openDirectMessage("ff".repeat(32));
+    const event = calls[0].body as NostrEvent;
+    expect(channelId).toBe(event.tags[1][1]);
+    expect(channelId).not.toBe("");
+  });
+
+  it("generates a different id on each call", async () => {
+    const { client, calls } = clientWithResponses([
+      { accepted: true, message: "" },
+      { accepted: true, message: "" },
+    ]);
+    await client.openDirectMessage("ee".repeat(32));
+    await client.openDirectMessage("ee".repeat(32));
+    const first = (calls[0].body as NostrEvent).tags[1][1];
+    const second = (calls[1].body as NostrEvent).tags[1][1];
+    expect(first).not.toBe(second);
+  });
+
+  it("throws with the relay's reason when the open is rejected", async () => {
+    const { client } = clientWithResponses([{ accepted: false, message: "not allowed" }]);
+    await expect(client.openDirectMessage("ee".repeat(32))).rejects.toThrow("Relay rejected the request: not allowed");
   });
 });

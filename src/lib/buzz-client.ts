@@ -1,7 +1,10 @@
+import { randomUUID } from "node:crypto";
 import { buildNip98Header, getPublicKeyHex, signEvent } from "./nostr";
 import { normalizeRelayUrl } from "./relay-url";
 import { getThreadReference, isThreadReply } from "./threading";
-import type { Channel, Filter, Message, NostrEvent, UserStatus } from "./types";
+import { parseOpenedChannelId } from "./dm-response";
+import { newestPerAuthor, profileName, shortenPubkey } from "./directory";
+import type { Channel, DirectMessage, Filter, Message, NostrEvent, UserStatus } from "./types";
 
 /** Fetch multiple of the requested limit, since replies are filtered out after the query. */
 const OVER_FETCH = 4;
@@ -249,7 +252,80 @@ export class BuzzClient {
     await this.publishSigned({ kind: 20001, tags: [], content: state });
   }
 
-  private async publishSigned(fields: { kind: number; tags: string[][]; content: string }): Promise<void> {
+  /**
+   * Display names for the given pubkeys, from their kind:0 profiles. Pubkeys
+   * with no profile, or a profile carrying no usable name, are simply absent
+   * from the map; callers fall back to a shortened pubkey.
+   */
+  async lookupProfiles(pubkeys: string[]): Promise<Map<string, string>> {
+    const names = new Map<string, string>();
+    if (pubkeys.length === 0) return names;
+
+    const events = await this.query([{ kinds: [0], authors: pubkeys }]);
+    for (const event of newestPerAuthor(events)) {
+      const name = profileName(event.content);
+      if (name !== "") names.set(event.pubkey, name);
+    }
+    return names;
+  }
+
+  /**
+   * The DM conversations we are part of. A Buzz DM is a private channel rather
+   * than an encrypted envelope, so a conversation is a kind:41001 event whose
+   * `d` tag is the channel id that messages are then sent into normally.
+   */
+  async listDirectMessages(): Promise<DirectMessage[]> {
+    const me = getPublicKeyHex(this.secretKey);
+    const events = await this.query([{ kinds: [41001], "#p": [me] }]);
+
+    const conversations = events
+      .map((event) => ({
+        channelId: tagValue(event, "d") ?? "",
+        participants: event.tags
+          .filter((tag) => tag[0] === "p" && typeof tag[1] === "string" && tag[1] !== me)
+          .map((tag) => tag[1]),
+      }))
+      // Without a `d` tag there is no channel id, so messages would be sent
+      // with an empty `h` tag, the same reason listChannels drops those.
+      .filter((conversation) => conversation.channelId !== "");
+
+    const others = [...new Set(conversations.flatMap((c) => c.participants))];
+    const names = await this.lookupProfiles(others);
+
+    return conversations.map((conversation) => ({
+      ...conversation,
+      name: conversation.participants.map((pk) => names.get(pk) ?? shortenPubkey(pk)).join(", ") || "Direct message",
+    }));
+  }
+
+  /**
+   * Open a conversation with someone and return its channel id. The publish is
+   * idempotent: when a conversation already exists the relay answers with that
+   * conversation's id instead of creating a second one.
+   *
+   * The id is generated here and sent as the `d` tag, then the relay's own id is
+   * preferred if it returns one. That fallback is what Buzz's CLI does, and it
+   * is load-bearing: without it, a relay that does not echo an id leaves us with
+   * no channel to send into.
+   */
+  async openDirectMessage(pubkey: string): Promise<string> {
+    const localId = randomUUID();
+    const result = await this.publishSigned({
+      kind: 41010,
+      tags: [
+        ["p", pubkey],
+        ["d", localId],
+      ],
+      content: "",
+    });
+    return parseOpenedChannelId(result.message) ?? localId;
+  }
+
+  private async publishSigned(fields: {
+    kind: number;
+    tags: string[][];
+    content: string;
+  }): Promise<{ accepted: boolean; message: string }> {
     const created_at = nextCreatedAt(fields.kind, fields.tags);
     const event = signEvent({ ...fields, created_at }, this.secretKey);
     const result = await this.publish(event);
@@ -262,6 +338,7 @@ export class BuzzClient {
           : "Relay rejected the request (auth or permission)",
       );
     }
+    return result;
   }
 
   private async post(path: string, body: unknown): Promise<unknown> {
