@@ -848,10 +848,16 @@ describe("listDirectMessages", () => {
   });
 
   it("ignores a DM channel whose p tags do not include us", async () => {
+    const me = ownPubkey();
+    // Both conversations are returned by the relay; only the one we are a
+    // participant in may be listed. Two events rather than one so that
+    // dropping the participant check produces a wrong LIST rather than merely
+    // exhausting the queued fixtures, which would fail for the wrong reason.
+    const ours = dmEvent("chan-ours", [me, "aa".repeat(32)]);
     const notOurs = dmEvent("chan-11", ["aa".repeat(32), "bb".repeat(32)]);
-    const { client } = clientWithResponses([[notOurs]]);
+    const { client } = clientWithResponses([[ours, notOurs], []]);
     const dms = await client.listDirectMessages();
-    expect(dms).toEqual([]);
+    expect(dms.map((dm) => dm.channelId)).toEqual(["chan-ours"]);
   });
 
   it("ignores a normal (non-DM) 39000 channel", async () => {
