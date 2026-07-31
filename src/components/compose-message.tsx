@@ -1,4 +1,6 @@
+import { useRef } from "react";
 import { Form, ActionPanel, Action, showToast, Toast, popToRoot } from "@raycast/api";
+import { errorMessage } from "../lib/errors";
 import type { BuzzClient } from "../lib/buzz-client";
 
 /**
@@ -7,11 +9,19 @@ import type { BuzzClient } from "../lib/buzz-client";
  * are the same publish and deliberately the same form.
  */
 export function ComposeMessage(props: { client: BuzzClient; channelId: string; destination: string }) {
+  // A ref rather than state: two Enter presses can land in the same tick, before
+  // React has re-rendered, and a state flag would still read false for the
+  // second one. The message is publicly visible and this extension offers no
+  // delete, so a duplicate send is not something the user can take back.
+  const sending = useRef(false);
+
   async function onSubmit(values: { content: string }) {
+    if (sending.current) return;
     if (!values.content.trim()) {
       await showToast({ style: Toast.Style.Failure, title: "Message is empty" });
       return;
     }
+    sending.current = true;
     try {
       await props.client.sendMessage(props.channelId, values.content);
       await showToast({ style: Toast.Style.Success, title: "Message sent" });
@@ -21,8 +31,12 @@ export function ComposeMessage(props: { client: BuzzClient; channelId: string; d
       await showToast({
         style: Toast.Style.Failure,
         title: "Send failed",
-        message: e instanceof Error ? e.message : String(e),
+        message: errorMessage(e),
       });
+    } finally {
+      // Released either way: a failed send leaves the form open, and the retry
+      // it exists to allow must not be swallowed by the guard.
+      sending.current = false;
     }
   }
 

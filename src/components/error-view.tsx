@@ -1,4 +1,5 @@
 import { List, ActionPanel, Action, openExtensionPreferences } from "@raycast/api";
+import { errorMessage } from "../lib/errors";
 
 /**
  * A List view for surfacing configuration or relay errors, with a shortcut to
@@ -6,7 +7,7 @@ import { List, ActionPanel, Action, openExtensionPreferences } from "@raycast/ap
  * the private key.
  */
 export function ErrorView({ error }: { error: unknown }) {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = errorMessage(error);
   return (
     <List>
       <List.EmptyView

@@ -21,9 +21,18 @@ export default function Command() {
     return <ErrorView error={error} />;
   }
 
+  const hasQuery = query.trim() !== "";
+
   return (
     <List isLoading={isLoading} throttle onSearchTextChange={setQuery} searchBarPlaceholder="Search messages">
-      <List.EmptyView title="Search Buzz messages" description="Type a query to search accessible channels" />
+      {/* The same empty view stands for "nothing typed yet" and "that search
+          found nothing". The query is tracked here, so the two are told apart
+          rather than asking someone who just searched to type a query. */}
+      {hasQuery ? (
+        <List.EmptyView title="No matches" description="No message in an accessible channel matches this search" />
+      ) : (
+        <List.EmptyView title="Search Buzz messages" description="Type a query to search accessible channels" />
+      )}
       {(data ?? []).map((message) => {
         // A search hit whose event carried no h tag has no channel to link to,
         // and the Buzz deep-link parser rejects a link missing `channel`, so

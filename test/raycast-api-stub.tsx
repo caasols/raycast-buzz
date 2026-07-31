@@ -203,6 +203,7 @@ export function List(props: {
   onSearchTextChange?: (text: string) => void;
   throttle?: boolean;
   filtering?: boolean | { keepSectionOrder: boolean };
+  actions?: ReactNode;
 }) {
   const items: ReactNode[] = [];
   const emptyViews: ReactNode[] = [];
@@ -238,6 +239,15 @@ export function List(props: {
       // (false) is still caught, even though what that default actually does
       // to the rendered list is not something this stub can show.
       data-filtering={String(Boolean(props.filtering))}
+      // Whether Raycast itself would be filtering this list, per the documented
+      // default in SearchBarInterface: `filtering` is false when
+      // onSearchTextChange is specified and true otherwise, unless set
+      // explicitly. The stub still cannot perform that filtering, but this
+      // makes the premise assertable, so a view whose empty-state copy is
+      // written for native filtering can pin that it still has it.
+      data-native-filtering={String(
+        props.filtering === undefined ? props.onSearchTextChange === undefined : Boolean(props.filtering),
+      )}
     >
       <input
         data-testid="search-bar"
@@ -246,6 +256,9 @@ export function List(props: {
       />
       {/* Raycast hides the empty view as soon as there is at least one item. */}
       {items.length > 0 ? items : emptyViews}
+      {/* The List's own ActionPanel: Raycast's fallback when no item is
+          selected, including when its native filtering has hidden every row. */}
+      {props.actions === undefined ? null : <div data-testid="list-actions">{props.actions}</div>}
     </div>
   );
 }

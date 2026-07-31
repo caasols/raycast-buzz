@@ -184,6 +184,61 @@ describe("Send Message", () => {
     expect(view.props.destination).toBe("Bo");
   });
 
+  it("opens one conversation when Write Message is fired twice before the first resolves", async () => {
+    // openDirectMessage is idempotent, so the damage is navigational: a second
+    // push stacks a second composer for the same conversation and the user has
+    // to press Back twice. openDirectMessage is held open deliberately, so the
+    // second click is turned away by the in-flight guard rather than by a
+    // fixture that ran out of queued responses.
+    let release!: (channelId: string) => void;
+    const client = fakeClient({
+      openDirectMessage: vi.fn(
+        () =>
+          new Promise<string>((resolve) => {
+            release = resolve;
+          }),
+      ),
+    });
+    mocks.getClient.mockReturnValue(client);
+    mocks.searchPeople.mockResolvedValue(PEOPLE);
+    render(<Command />);
+    await loaded();
+    search("bo");
+    await waitFor(() => expect(rowTitled("Bo")).toBeTruthy());
+
+    act("Bo", "Write Message");
+    act("Bo", "Write Message");
+
+    expect(client.openDirectMessage).toHaveBeenCalledTimes(1);
+    release("opened-chan");
+    await waitFor(() => expect(push).toHaveBeenCalledTimes(1));
+    expect(client.openDirectMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows another attempt after opening the conversation failed", async () => {
+    // The guard must release on failure, or a relay hiccup would leave that
+    // person permanently unwritable for the rest of the session.
+    const openDirectMessage = vi
+      .fn<(pubkey: string) => Promise<string>>()
+      .mockRejectedValueOnce(new Error("Relay rejected the request: not allowed"))
+      .mockResolvedValueOnce("opened-chan");
+    mocks.getClient.mockReturnValue(fakeClient({ openDirectMessage }));
+    mocks.searchPeople.mockResolvedValue(PEOPLE);
+    render(<Command />);
+    await loaded();
+    search("bo");
+    await waitFor(() => expect(rowTitled("Bo")).toBeTruthy());
+
+    act("Bo", "Write Message");
+    await waitFor(() =>
+      expect(showToast).toHaveBeenCalledWith(expect.objectContaining({ title: "Could not open the conversation" })),
+    );
+
+    act("Bo", "Write Message");
+    await waitFor(() => expect(openDirectMessage).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(push).toHaveBeenCalledTimes(1));
+  });
+
   it("does not compose when opening the conversation fails", async () => {
     const client = fakeClient({
       openDirectMessage: vi.fn(async () => {
@@ -359,6 +414,38 @@ describe("Send Message", () => {
       fakeClient({ listChannels: vi.fn(async () => []), listDirectMessages: vi.fn(async () => []) }),
     );
     render(<Command />);
+    await waitFor(() => expect(screen.getByTestId("empty-view")).toHaveAttribute("data-title", "Nothing to write to"));
+    expect(screen.getByTestId("empty-view")).toHaveAttribute(
+      "data-description",
+      "No channels or conversations on this relay",
+    );
+  });
+
+  it("says the search matched nothing, not that the relay is bare, once a query is typed", async () => {
+    // The relay loaded fine; the query simply matched nothing. Telling the user
+    // there is nothing on the relay would be a different, wrong diagnosis.
+    mocks.getClient.mockReturnValue(
+      fakeClient({ listChannels: vi.fn(async () => []), listDirectMessages: vi.fn(async () => []) }),
+    );
+    render(<Command />);
+    await waitFor(() => expect(screen.getByTestId("empty-view")).toHaveAttribute("data-title", "Nothing to write to"));
+
+    search("nothing matches this");
+
+    await waitFor(() => expect(screen.getByTestId("empty-view")).toHaveAttribute("data-title", "No matches"));
+    expect(screen.getByTestId("empty-view").getAttribute("data-description")).toMatch(/match/i);
+  });
+
+  it("goes back to the relay-is-empty copy when the query is cleared", async () => {
+    mocks.getClient.mockReturnValue(
+      fakeClient({ listChannels: vi.fn(async () => []), listDirectMessages: vi.fn(async () => []) }),
+    );
+    render(<Command />);
+    search("nothing matches this");
+    await waitFor(() => expect(screen.getByTestId("empty-view")).toHaveAttribute("data-title", "No matches"));
+
+    search("");
+
     await waitFor(() => expect(screen.getByTestId("empty-view")).toHaveAttribute("data-title", "Nothing to write to"));
   });
 });

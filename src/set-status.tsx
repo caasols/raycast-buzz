@@ -12,13 +12,10 @@ import {
 } from "@raycast/api";
 import { usePromise } from "@raycast/utils";
 import { getClient } from "./lib/preferences";
+import { errorMessage } from "./lib/errors";
 import { ErrorView } from "./components/error-view";
 import { StatusForm } from "./components/status-form";
 import { listPresets, createPreset, updatePreset, deletePreset, StatusPreset } from "./lib/presets";
-
-function errorMessage(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
-}
 
 export default function Command() {
   const { pop } = useNavigation();
@@ -139,7 +136,22 @@ export default function Command() {
   const statusError = data?.statusError ?? null;
 
   return (
-    <List isLoading={isLoading} searchBarPlaceholder="Search statuses">
+    <List
+      isLoading={isLoading}
+      searchBarPlaceholder="Search statuses"
+      // Every other action lives in a row's panel, and Raycast's native
+      // filtering is on here (no onSearchTextChange), so a query matching
+      // neither the Current Status row nor any preset title hides every row and
+      // falls back to Raycast's own empty view, which carries no actions. The
+      // two actions that do not need a row to act on are repeated here, on the
+      // List itself, so they stay reachable without clearing the search first.
+      actions={
+        <ActionPanel>
+          {customStatusAction}
+          {createPresetAction}
+        </ActionPanel>
+      }
+    >
       <List.Section title="Current Status">
         <List.Item
           key="current-status"

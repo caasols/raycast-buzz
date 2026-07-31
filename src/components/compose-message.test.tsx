@@ -72,6 +72,46 @@ describe("ComposeMessage", () => {
     expect(popToRoot).not.toHaveBeenCalled();
   });
 
+  it("sends once when submit is fired twice before the first send resolves", async () => {
+    // A public message with no delete: the second Enter press must not publish
+    // a duplicate. sendMessage is held open deliberately, so the second submit
+    // is rejected by the in-flight guard rather than by a spent fixture.
+    let release!: () => void;
+    const client = fakeClient({
+      sendMessage: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            release = () => resolve();
+          }),
+      ),
+    });
+    render(<ComposeMessage client={client} channelId="chan-1" destination="general" />);
+    typeMessage("hello twice");
+    submit();
+    submit();
+
+    expect(client.sendMessage).toHaveBeenCalledTimes(1);
+    release();
+    await waitFor(() => expect(popToRoot).toHaveBeenCalledTimes(1));
+    expect(client.sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows a retry after a failed send, so the guard is not a one-way latch", async () => {
+    const sendMessage = vi
+      .fn<(channelId: string, content: string) => Promise<void>>()
+      .mockRejectedValueOnce(new Error("Relay rejected the request: read-only"))
+      .mockResolvedValueOnce(undefined);
+    const client = fakeClient({ sendMessage });
+    render(<ComposeMessage client={client} channelId="chan-1" destination="general" />);
+    typeMessage("hello");
+    submit();
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.objectContaining({ title: "Send failed" })));
+
+    submit();
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(2));
+    expect(popToRoot).toHaveBeenCalled();
+  });
+
   it("reports a non-Error rejection as text", async () => {
     const client = fakeClient({
       sendMessage: vi.fn(async () => {

@@ -79,9 +79,24 @@ describe("ChannelMessages", () => {
   it("shows the empty view when the channel has no messages at all", async () => {
     const client = fakeClient({ getMessages: vi.fn(async () => result([], 0)) });
     render(<ChannelMessages client={client} channel={CHANNEL} />);
-    await waitFor(() => expect(screen.getByTestId("empty-view")).toHaveAttribute("data-title", "No messages"));
-    expect(screen.getByTestId("empty-view")).toHaveAttribute("data-description", "This channel has no messages yet");
+    await waitFor(() => expect(screen.getByTestId("empty-view")).toHaveAttribute("data-title", "No messages to show"));
+    expect(screen.getByTestId("empty-view")).toHaveAttribute(
+      "data-description",
+      "This channel has no messages yet, or none match the current search.",
+    );
     expect(screen.queryAllByTestId("list-item")).toHaveLength(0);
+  });
+
+  it("does not assert the channel is empty, since native filtering can empty it too", async () => {
+    // This view has no onSearchTextChange (adding one would turn Raycast's own
+    // filtering off), so it cannot tell "no messages" from "nothing matched".
+    // The copy must not claim either one outright.
+    const client = fakeClient({ getMessages: vi.fn(async () => result([], 0)) });
+    render(<ChannelMessages client={client} channel={CHANNEL} />);
+    const emptyView = await waitFor(() => screen.getByTestId("empty-view"));
+    expect(screen.getByTestId("list")).toHaveAttribute("data-native-filtering", "true");
+    expect(emptyView.getAttribute("data-description")).toMatch(/match/i);
+    expect(emptyView.getAttribute("data-description")).not.toBe("This channel has no messages yet");
   });
 
   it("says the recent messages are all thread replies when the fetched window held events but no visible root", async () => {
@@ -94,7 +109,7 @@ describe("ChannelMessages", () => {
     );
     const emptyView = screen.getByTestId("empty-view");
     expect(emptyView.getAttribute("data-description")).toMatch(/repl/i);
-    expect(emptyView.getAttribute("data-description")).not.toBe("This channel has no messages yet");
+    expect(emptyView.getAttribute("data-description")).not.toMatch(/no messages yet/i);
     expect(screen.queryAllByTestId("list-item")).toHaveLength(0);
   });
 
@@ -212,6 +227,53 @@ describe("ChannelMessages react action", () => {
     fireEvent.click(screen.getAllByTestId("action").find((b) => b.dataset.title === "React (Like)")!);
 
     await waitFor(() => expect(client.getMessages).toHaveBeenCalledTimes(2));
+  });
+
+  it("publishes one reaction when React (Like) is fired twice before the first resolves", async () => {
+    // A kind:7 reaction is an ordinary, non-replaceable event: a second publish
+    // is a second reaction, not an overwrite. react() is held open deliberately,
+    // so the second click is turned away by the in-flight guard rather than by a
+    // fixture that ran out of queued responses.
+    let release!: () => void;
+    const client = fakeClient({
+      react: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            release = () => resolve();
+          }),
+      ),
+    });
+    render(<ChannelMessages client={client} channel={CHANNEL} />);
+    await items();
+
+    const react = screen.getAllByTestId("action").find((b) => b.dataset.title === "React (Like)")!;
+    fireEvent.click(react);
+    fireEvent.click(react);
+
+    expect(client.react).toHaveBeenCalledTimes(1);
+    release();
+    await waitFor(() => expect(client.getMessages).toHaveBeenCalledTimes(2));
+    expect(client.react).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows reacting again after the relay rejected the first attempt", async () => {
+    // The guard must release on failure, or a rejected reaction could never be
+    // retried without leaving and re-entering the channel.
+    const react = vi
+      .fn<(id: string, channelId: string, content: string) => Promise<void>>()
+      .mockRejectedValueOnce(new Error("Relay rejected the request: restricted"))
+      .mockResolvedValueOnce(undefined);
+    const client = fakeClient({ react });
+    render(<ChannelMessages client={client} channel={CHANNEL} />);
+    await items();
+
+    const like = () =>
+      fireEvent.click(screen.getAllByTestId("action").find((b) => b.dataset.title === "React (Like)")!);
+    like();
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.objectContaining({ title: "Reaction failed" })));
+
+    like();
+    await waitFor(() => expect(react).toHaveBeenCalledTimes(2));
   });
 
   it("reports a rejected reaction with the relay's reason and does not reload", async () => {

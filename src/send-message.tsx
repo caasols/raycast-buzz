@@ -1,19 +1,22 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { List, ActionPanel, Action, Icon, showToast, Toast, useNavigation } from "@raycast/api";
 import { usePromise } from "@raycast/utils";
 import { getClient } from "./lib/preferences";
 import { searchPeople } from "./lib/directory";
+import { errorMessage } from "./lib/errors";
 import { ErrorView } from "./components/error-view";
 import { ComposeMessage } from "./components/compose-message";
 import type { DirectMessage, Person } from "./lib/types";
 
-function reason(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
-}
-
 export default function Command() {
   const [query, setQuery] = useState("");
   const { push } = useNavigation();
+  // Which people already have a conversation being opened. openDirectMessage is
+  // idempotent, so a double fire is not data corruption, but it pushes a second
+  // composer for the same conversation onto the navigation stack and the user
+  // has to press Back twice to get out. A ref rather than state, since two
+  // clicks can land in the same tick.
+  const opening = useRef(new Set<string>());
 
   const { isLoading, data, error } = usePromise(async () => {
     const client = getClient();
@@ -28,7 +31,7 @@ export default function Command() {
         await showToast({
           style: Toast.Style.Failure,
           title: "Could not load conversations",
-          message: reason(e),
+          message: errorMessage(e),
         });
         return [] as DirectMessage[];
       }),
@@ -50,7 +53,7 @@ export default function Command() {
       try {
         return await searchPeople(getClient(), q.trim());
       } catch (e) {
-        await showToast({ style: Toast.Style.Failure, title: "People search failed", message: reason(e) });
+        await showToast({ style: Toast.Style.Failure, title: "People search failed", message: errorMessage(e) });
         return [] as Person[];
       }
     },
@@ -75,7 +78,15 @@ export default function Command() {
       // order rather than being re-ranked by match quality.
       filtering={{ keepSectionOrder: true }}
     >
-      <List.EmptyView title="Nothing to write to" description="No channels or conversations on this relay" />
+      {/* Two different states reach the same empty view: a relay with nothing on
+          it, and a search that matched nothing. This command already tracks the
+          query, so it can tell them apart and must, rather than telling someone
+          who just searched that the relay is bare. */}
+      {hasQuery ? (
+        <List.EmptyView title="No matches" description="No channel, conversation or person matches this search" />
+      ) : (
+        <List.EmptyView title="Nothing to write to" description="No channels or conversations on this relay" />
+      )}
 
       {data && (
         <List.Section title="Channels">
@@ -155,6 +166,8 @@ export default function Command() {
                     title="Write Message"
                     icon={Icon.Pencil}
                     onAction={async () => {
+                      if (opening.current.has(person.pubkey)) return;
+                      opening.current.add(person.pubkey);
                       try {
                         // Idempotent: an existing conversation comes back rather than a new one.
                         const channelId = await data.client.openDirectMessage(person.pubkey);
@@ -163,8 +176,12 @@ export default function Command() {
                         await showToast({
                           style: Toast.Style.Failure,
                           title: "Could not open the conversation",
-                          message: reason(e),
+                          message: errorMessage(e),
                         });
+                      } finally {
+                        // Released on failure too, so a conversation the relay
+                        // refused to open can be tried again.
+                        opening.current.delete(person.pubkey);
                       }
                     }}
                   />

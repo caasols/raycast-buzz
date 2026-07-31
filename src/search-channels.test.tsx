@@ -56,7 +56,20 @@ describe("Search Channels", () => {
   it("shows the empty view when the relay has no channels", async () => {
     mocks.getClient.mockReturnValue(fakeClient({ listChannels: vi.fn(async () => []) }));
     render(<Command />);
-    await waitFor(() => expect(screen.getByTestId("empty-view")).toHaveAttribute("data-title", "No channels"));
+    await waitFor(() => expect(screen.getByTestId("empty-view")).toHaveAttribute("data-title", "No channels to show"));
+  });
+
+  it("does not assert the relay is bare, since native filtering can empty the list too", async () => {
+    // No onSearchTextChange here, so Raycast filters the rows itself and this
+    // command never sees the query. Adding one to tell "no channels" apart from
+    // "nothing matched" would silently turn that filtering off, so the copy has
+    // to be true in both states instead.
+    mocks.getClient.mockReturnValue(fakeClient({ listChannels: vi.fn(async () => []) }));
+    render(<Command />);
+    const emptyView = await waitFor(() => screen.getByTestId("empty-view"));
+    expect(screen.getByTestId("list")).toHaveAttribute("data-native-filtering", "true");
+    expect(emptyView.getAttribute("data-description")).toMatch(/match/i);
+    expect(emptyView.getAttribute("data-description")).not.toBe("No channels found on this relay");
   });
 
   it("shows the error view when preferences are not configured", async () => {

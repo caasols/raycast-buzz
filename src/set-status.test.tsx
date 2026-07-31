@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor, within } from "@testing-library/react";
 import { showToast, Toast, LocalStorage, confirmAlert, Alert } from "@raycast/api";
 // `__resetLocalStorage` and `pop` are stub-only test helpers that the real
 // @raycast/api package does not declare, so they are imported by relative
@@ -265,6 +265,71 @@ describe("Set Status list", () => {
     setItemSpy.mockRestore();
   });
 
+  it("refetches the current status after a preset is applied", async () => {
+    // Without revalidate() the Current Status row keeps showing the status that
+    // was there before, so the command looks like it did nothing.
+    const client = fakeClient();
+    mocks.getClient.mockReturnValue(client);
+    render(<Command />);
+    await items();
+    expect(client.getStatus).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(action("Set This Status")!);
+
+    await waitFor(() => expect(client.getStatus).toHaveBeenCalledTimes(2));
+  });
+
+  it("does not refetch when clearing the status failed", async () => {
+    // Nothing changed on the relay, so refetching would only re-render the same
+    // row and could paper over the failure the toast just reported.
+    const client = fakeClient({
+      getStatus: vi.fn(async () => ({ text: "in a meeting", emoji: "" })),
+      clearStatus: vi.fn(async () => {
+        throw new Error("nope");
+      }),
+    });
+    mocks.getClient.mockReturnValue(client);
+    render(<Command />);
+    await items();
+    expect(client.getStatus).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(action("Clear Status")!);
+    await waitFor(() =>
+      expect(showToast).toHaveBeenCalledWith(expect.objectContaining({ title: "Could not clear status" })),
+    );
+
+    expect(client.getStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not refetch when deleting a preset failed", async () => {
+    const client = fakeClient();
+    mocks.getClient.mockReturnValue(client);
+    render(<Command />);
+    await items();
+    expect(client.getStatus).toHaveBeenCalledTimes(1);
+
+    const setItemSpy = vi.spyOn(LocalStorage, "setItem").mockRejectedValueOnce(new Error("disk full"));
+    fireEvent.click(action("Delete Preset")!);
+    await waitFor(() =>
+      expect(showToast).toHaveBeenCalledWith(expect.objectContaining({ title: "Could not delete preset" })),
+    );
+
+    expect(client.getStatus).toHaveBeenCalledTimes(1);
+    setItemSpy.mockRestore();
+  });
+
+  it("refetches the current status after a preset is deleted", async () => {
+    const client = fakeClient();
+    mocks.getClient.mockReturnValue(client);
+    render(<Command />);
+    await items();
+    expect(client.getStatus).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(action("Delete Preset")!);
+
+    await waitFor(() => expect(client.getStatus).toHaveBeenCalledTimes(2));
+  });
+
   it("shows the error view when the relay cannot be reached", async () => {
     mocks.getClient.mockImplementation(() => {
       throw new Error("Cannot reach relay at https://relay.test");
@@ -388,6 +453,60 @@ describe("Set Status list", () => {
     fireEvent.click(screen.getByTestId("submit"));
     await waitFor(() => expect(client.setStatus).toHaveBeenCalledWith("quick status", undefined));
     resolveStatus(null);
+  });
+
+  it("carries Set Custom Status and Create Preset on the List itself, not only on rows", async () => {
+    // Raycast's native filtering is on here (no onSearchTextChange), so a query
+    // matching neither the Current Status row's dynamic title nor any preset
+    // hides every row and falls back to Raycast's own empty view, which has no
+    // actions. These two need no row to act on, so they live on the List.
+    mocks.getClient.mockReturnValue(fakeClient());
+    render(<Command />);
+    await items();
+
+    expect(screen.getByTestId("list")).toHaveAttribute("data-native-filtering", "true");
+    const listActions = within(screen.getByTestId("list-actions"))
+      .getAllByTestId("action")
+      .map((b) => b.dataset.title);
+    expect(listActions).toContain("Set Custom Status");
+    expect(listActions).toContain("Create Preset");
+  });
+
+  it("sets a custom status from the List's own action panel", async () => {
+    const client = fakeClient();
+    mocks.getClient.mockReturnValue(client);
+    render(<Command />);
+    await items();
+
+    const listPanel = screen.getByTestId("list-actions");
+    fireEvent.click(
+      within(listPanel)
+        .getAllByTestId("action")
+        .find((b) => b.dataset.title === "Set Custom Status")!,
+    );
+    await waitFor(() => expect(within(listPanel).getByTestId("form")).toBeInTheDocument());
+    fireEvent.change(within(listPanel).getByTestId("field-text"), { target: { value: "heads down" } });
+    fireEvent.click(within(listPanel).getByTestId("submit"));
+
+    await waitFor(() => expect(client.setStatus).toHaveBeenCalledWith("heads down", undefined));
+  });
+
+  it("creates a preset from the List's own action panel", async () => {
+    mocks.getClient.mockReturnValue(fakeClient());
+    render(<Command />);
+    const before = await items();
+
+    const listPanel = screen.getByTestId("list-actions");
+    fireEvent.click(
+      within(listPanel)
+        .getAllByTestId("action")
+        .find((b) => b.dataset.title === "Create Preset")!,
+    );
+    await waitFor(() => expect(within(listPanel).getByTestId("form")).toBeInTheDocument());
+    fireEvent.change(within(listPanel).getByTestId("field-text"), { target: { value: "from the list panel" } });
+    fireEvent.click(within(listPanel).getByTestId("submit"));
+
+    await waitFor(() => expect(screen.getAllByTestId("list-item")).toHaveLength(before.length + 1));
   });
 
   it("opens the create preset form", async () => {

@@ -57,7 +57,34 @@ describe("Search Messages", () => {
     mocks.getClient.mockReturnValue(client);
     render(<Command />);
     await waitFor(() => expect(screen.getByTestId("empty-view")).toHaveAttribute("data-title", "Search Buzz messages"));
+    expect(screen.getByTestId("empty-view")).toHaveAttribute(
+      "data-description",
+      "Type a query to search accessible channels",
+    );
     expect(client.searchMessages).not.toHaveBeenCalled();
+  });
+
+  it("says the search found nothing, rather than asking for a query already typed", async () => {
+    mocks.getClient.mockReturnValue(fakeClient({ searchMessages: vi.fn(async () => []) }));
+    render(<Command />);
+    type("nothing matches this");
+
+    await waitFor(() => expect(screen.getByTestId("empty-view")).toHaveAttribute("data-title", "No matches"));
+    const description = screen.getByTestId("empty-view").getAttribute("data-description") ?? "";
+    expect(description).toMatch(/match/i);
+    // The pre-search prompt would be an instruction the user has already followed.
+    expect(description).not.toMatch(/type a query/i);
+  });
+
+  it("goes back to the prompt when the query is cleared", async () => {
+    mocks.getClient.mockReturnValue(fakeClient({ searchMessages: vi.fn(async () => []) }));
+    render(<Command />);
+    type("nothing matches this");
+    await waitFor(() => expect(screen.getByTestId("empty-view")).toHaveAttribute("data-title", "No matches"));
+
+    type("");
+
+    await waitFor(() => expect(screen.getByTestId("empty-view")).toHaveAttribute("data-title", "Search Buzz messages"));
   });
 
   it("searches the relay for what was typed", async () => {
