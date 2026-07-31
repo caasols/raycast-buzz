@@ -1,5 +1,6 @@
 import { BuzzClient } from "../src/lib/buzz-client";
 import { parseSecretKey } from "../src/lib/nostr";
+import { errorMessage } from "../src/lib/errors";
 
 const envRelayUrl = process.env.BUZZ_RELAY_URL;
 const envPrivateKey = process.env.BUZZ_PRIVATE_KEY;
@@ -77,8 +78,10 @@ async function main() {
     // Optional: set BUZZ_SMOKE_DM_PUBKEY to a 64-char hex pubkey to exercise the
     // DM path. This publishes a real kind:41010 event that opens a real
     // conversation with that pubkey, which the other person will see appear, so
-    // it is opt-in rather than automatic. Set it to your own pubkey to run the
-    // check without involving anyone else.
+    // it is opt-in rather than automatic. Use somebody else's pubkey, or one
+    // belonging to an agent you own: pointing it at your own pubkey makes the
+    // relay answer 500, because a conversation whose only participant is
+    // yourself is a case it does not handle.
     const dmPubkey = process.env.BUZZ_SMOKE_DM_PUBKEY;
     if (dmPubkey) {
       console.log(`Opening a DM with ${dmPubkey}...`);
@@ -108,8 +111,7 @@ async function main() {
 
     process.exit(0);
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    process.stderr.write(`Error: ${message}\n`);
+    process.stderr.write(`Error: ${errorMessage(e)}\n`);
     process.exit(1);
   }
 }

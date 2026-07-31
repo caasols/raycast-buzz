@@ -2,11 +2,10 @@
   "$schema": "https://www.raycast.com/schemas/extension.json",
   "name": "buzz",
   "title": "Buzz",
-  "description": "Manage your Buzz workspace from Raycast",
+  "description": "Browse channels, search messages, send direct messages, and set your status in Buzz",
   "icon": "extension-icon.png",
   "author": "caasols",
   "platforms": [
-    "Windows",
     "macOS"
   ],
   "categories": [
