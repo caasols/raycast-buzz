@@ -42,6 +42,65 @@ function newestFirst(a: Message, b: Message): number {
   return b.createdAt - a.createdAt;
 }
 
+/**
+ * Nostr treats kinds 10000-19999 as replaceable and 30000-39999 as
+ * parameterized-replaceable: the relay keeps only the newest event per
+ * coordinate. Kind 0 (metadata) and kind 3 (contacts) are also replaceable,
+ * but this client never publishes either, so only the two numeric ranges it
+ * actually writes into are handled here rather than pretending to be
+ * exhaustive over the whole spec.
+ */
+function isReplaceableKind(kind: number): boolean {
+  return (kind >= 10000 && kind <= 19999) || (kind >= 30000 && kind <= 39999);
+}
+
+function replaceableCoordinate(kind: number, tags: string[][]): string {
+  const dTag = tags.find((t) => t[0] === "d")?.[1] ?? "";
+  return `${kind}:${dTag}`;
+}
+
+/**
+ * Last `created_at` (in seconds) this process has published for a given
+ * replaceable coordinate. Module-level rather than a `BuzzClient` field: the
+ * Set Status command's "apply" and "clear" affordances each call
+ * `getClient()` in src/lib/preferences.ts, which mints a fresh `BuzzClient`
+ * per action, so an instance field would not see both calls.
+ *
+ * Why this exists: the relay (crates/buzz-db/src/event.rs in block/buzz)
+ * breaks a created_at tie on a replaceable coordinate by keeping the event
+ * with the LOWEST id ("canonical NIP-16 ordering"), so two replaceable
+ * publishes that land in the same wall-clock second are a coin flip on
+ * whose sha256 sorts lower. `signEvent` stamps `Math.floor(Date.now() /
+ * 1000)`, so a set-then-clear within the same second could silently lose.
+ * Stamping every replaceable publish with a created_at strictly greater than
+ * the last one used for that coordinate removes the tie entirely.
+ */
+const lastReplaceableCreatedAt = new Map<string, number>();
+
+function nextCreatedAt(kind: number, tags: string[][]): number {
+  const now = Math.floor(Date.now() / 1000);
+  if (!isReplaceableKind(kind)) return now;
+  const key = replaceableCoordinate(kind, tags);
+  const last = lastReplaceableCreatedAt.get(key);
+  const createdAt = last === undefined ? now : Math.max(now, last + 1);
+  lastReplaceableCreatedAt.set(key, createdAt);
+  return createdAt;
+}
+
+/** Test-only: forget all tracked replaceable-coordinate clock state. */
+export function __resetReplaceableClock(): void {
+  lastReplaceableCreatedAt.clear();
+}
+
+/**
+ * Test-only: expose the monotonic created_at calculation directly, so tests
+ * can exercise coordinate isolation (e.g. two different `d` tags on the same
+ * kind) without adding a public `BuzzClient` method just to pick one.
+ */
+export function __nextReplaceableCreatedAt(kind: number, tags: string[][]): number {
+  return nextCreatedAt(kind, tags);
+}
+
 async function readRelayError(res: Response): Promise<string> {
   try {
     const text = await res.text();
@@ -191,7 +250,8 @@ export class BuzzClient {
   }
 
   private async publishSigned(fields: { kind: number; tags: string[][]; content: string }): Promise<void> {
-    const event = signEvent({ ...fields, created_at: Math.floor(Date.now() / 1000) }, this.secretKey);
+    const created_at = nextCreatedAt(fields.kind, fields.tags);
+    const event = signEvent({ ...fields, created_at }, this.secretKey);
     const result = await this.publish(event);
     if (!result.accepted) {
       // Carry the relay's own reason when it gives one: a bare "auth or

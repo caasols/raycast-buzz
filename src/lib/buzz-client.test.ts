@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
-import { BuzzClient, RelayError } from "./buzz-client";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { BuzzClient, RelayError, __resetReplaceableClock, __nextReplaceableCreatedAt } from "./buzz-client";
 import { parseSecretKey, signEvent } from "./nostr";
 import type { NostrEvent } from "./types";
 
@@ -566,5 +566,92 @@ describe("BuzzClient.getStatus", () => {
       ev({ kind: 30315, created_at: 10, content: "old", tags: [["d", "general"]] }),
     ]);
     expect(await client.getStatus()).toEqual({ text: "new", emoji: "" });
+  });
+});
+
+// Regression coverage for a bug the live smoke test caught: the relay
+// (crates/buzz-db/src/event.rs in block/buzz) breaks a created_at tie on a
+// replaceable coordinate by keeping the event with the LOWEST id, so a
+// set-then-clear within the same wall-clock second was effectively a coin
+// flip on whose sha256 sorted lower. Publishing a replaceable kind must stamp
+// a created_at that is strictly greater than the last one this process used
+// for that coordinate.
+describe("BuzzClient replaceable created_at monotonicity", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_700_000_000_000);
+    __resetReplaceableClock();
+  });
+
+  afterEach(() => {
+    __resetReplaceableClock();
+    vi.useRealTimers();
+  });
+
+  it("gives two setStatus calls in the same second strictly increasing created_at", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    const pSpy = vi.spyOn(client, "publish").mockResolvedValue({ accepted: true, message: "" });
+    await client.setStatus("first");
+    await client.setStatus("second");
+    const [firstAt, secondAt] = pSpy.mock.calls.map((c) => c[0].created_at);
+    expect(secondAt).toBeGreaterThan(firstAt);
+  });
+
+  it("gives a clearStatus that follows setStatus in the same second a strictly increasing created_at", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    const pSpy = vi.spyOn(client, "publish").mockResolvedValue({ accepted: true, message: "" });
+    await client.setStatus("in a meeting");
+    await client.clearStatus();
+    const [setAt, clearAt] = pSpy.mock.calls.map((c) => c[0].created_at);
+    expect(clearAt).toBeGreaterThan(setAt);
+  });
+
+  it("uses the real current time once it has caught up, instead of drifting ahead forever", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    const pSpy = vi.spyOn(client, "publish").mockResolvedValue({ accepted: true, message: "" });
+    await client.setStatus("first");
+    vi.setSystemTime(1_700_000_010_000); // 10 real seconds later
+    await client.setStatus("second");
+    const [firstAt, secondAt] = pSpy.mock.calls.map((c) => c[0].created_at);
+    expect(secondAt).toBe(firstAt + 10);
+  });
+
+  it("tracks separate d tags on the same kind independently", () => {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const first = __nextReplaceableCreatedAt(30315, [["d", "general"]]);
+    const second = __nextReplaceableCreatedAt(30315, [["d", "general"]]);
+    const other = __nextReplaceableCreatedAt(30315, [["d", "other"]]);
+    expect(second).toBeGreaterThan(first);
+    // A different coordinate is untouched by the bump on "general".
+    expect(other).toBe(nowSeconds);
+  });
+
+  it("falls back to an empty d tag for a replaceable kind that carries none", () => {
+    // Kind 15000 sits in the 10000-19999 (non-parameterized) replaceable
+    // range, which never carries a d tag; the coordinate key still has to
+    // resolve without one.
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    expect(__nextReplaceableCreatedAt(15000, [])).toBe(nowSeconds);
+  });
+
+  it("does not bump a non-replaceable kind: two kind:9 messages in the same second share created_at", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    const pSpy = vi.spyOn(client, "publish").mockResolvedValue({ accepted: true, message: "" });
+    await client.sendMessage("chan", "one");
+    await client.sendMessage("chan", "two");
+    const [firstAt, secondAt] = pSpy.mock.calls.map((c) => c[0].created_at);
+    expect(secondAt).toBe(firstAt);
+  });
+
+  it("resets cleanly between tests via __resetReplaceableClock", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    const pSpy = vi.spyOn(client, "publish").mockResolvedValue({ accepted: true, message: "" });
+    await client.setStatus("first");
+    __resetReplaceableClock();
+    await client.setStatus("second");
+    const [firstAt, secondAt] = pSpy.mock.calls.map((c) => c[0].created_at);
+    // Without the reset, the second call would be bumped ahead of the first;
+    // a clean reset makes it start over at the current simulated time.
+    expect(secondAt).toBe(firstAt);
   });
 });
