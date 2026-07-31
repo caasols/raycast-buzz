@@ -289,10 +289,21 @@ export class BuzzClient {
       // with an empty `h` tag, the same reason listChannels drops those.
       .filter((conversation) => conversation.channelId !== "");
 
-    const others = [...new Set(conversations.flatMap((c) => c.participants))];
+    // Kind 41001 is not in Nostr's replaceable ranges (unlike kind 39000
+    // channels), so nothing on the relay guarantees one event per channel id.
+    // Two events sharing a `d` tag would otherwise become a duplicate React
+    // key downstream; keep only the first one seen.
+    const seenChannelIds = new Set<string>();
+    const deduped = conversations.filter((conversation) => {
+      if (seenChannelIds.has(conversation.channelId)) return false;
+      seenChannelIds.add(conversation.channelId);
+      return true;
+    });
+
+    const others = [...new Set(deduped.flatMap((c) => c.participants))];
     const names = await this.lookupProfiles(others);
 
-    return conversations.map((conversation) => ({
+    return deduped.map((conversation) => ({
       ...conversation,
       name: conversation.participants.map((pk) => names.get(pk) ?? shortenPubkey(pk)).join(", ") || "Direct message",
     }));

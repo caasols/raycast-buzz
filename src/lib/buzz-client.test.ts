@@ -792,6 +792,28 @@ describe("listDirectMessages", () => {
     expect(await client.listDirectMessages()).toEqual([]);
     expect(calls).toHaveLength(1);
   });
+
+  it("omits a p tag with no value rather than crashing on it", async () => {
+    const me = ownPubkey();
+    const malformed: NostrEvent = {
+      ...dmEvent("chan-9", [me, "aa".repeat(32)]),
+      tags: [["d", "chan-9"], ["p", me], ["p"], ["p", "aa".repeat(32)]],
+    };
+    const { client } = clientWithResponses([[malformed], [profileEvent("aa".repeat(32), '{"name":"Ada"}')]]);
+    const dms = await client.listDirectMessages();
+    expect(dms).toEqual([{ channelId: "chan-9", participants: ["aa".repeat(32)], name: "Ada" }]);
+  });
+
+  it("dedupes conversations that share a d tag, keeping the first one seen", async () => {
+    const me = ownPubkey();
+    const { client } = clientWithResponses([
+      [dmEvent("chan-10", [me, "aa".repeat(32)]), dmEvent("chan-10", [me, "bb".repeat(32)])],
+      [profileEvent("aa".repeat(32), '{"name":"Ada"}')],
+    ]);
+    const dms = await client.listDirectMessages();
+    expect(dms.map((d) => d.channelId)).toEqual(["chan-10"]);
+    expect(dms[0].participants).toEqual(["aa".repeat(32)]);
+  });
 });
 
 describe("openDirectMessage", () => {
@@ -806,7 +828,7 @@ describe("openDirectMessage", () => {
     expect(event.content).toBe("");
     expect(event.tags[0]).toEqual(["p", "ee".repeat(32)]);
     expect(event.tags[1][0]).toBe("d");
-    expect(event.tags[1][1]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(event.tags[1][1]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(channelId).toBe("relay-id");
   });
 
