@@ -22,6 +22,23 @@ function tagValue(event: NostrEvent, name: string): string | undefined {
   return event.tags.find((t) => t[0] === name)?.[1];
 }
 
+/**
+ * Whether a kind:39000 channel-metadata event is a Buzz DM conversation
+ * rather than an ordinary channel. Verified empirically against a live
+ * relay: a DM is not its own event kind, it is a 39000 event carrying a
+ * `["t","dm"]` tag. `listChannels` uses this to exclude DMs from the channel
+ * list; `listDirectMessages` uses it to find them. Exported so tests can
+ * exercise it directly if needed, though the two public methods already
+ * cover it.
+ */
+export function isDmChannel(event: NostrEvent): boolean {
+  return event.kind === 39000 && event.tags.some((tag) => tag[0] === "t" && tag[1] === "dm");
+}
+
+function hasParticipant(event: NostrEvent, pubkey: string): boolean {
+  return event.tags.some((tag) => tag[0] === "p" && tag[1] === pubkey);
+}
+
 function toChannel(event: NostrEvent): Channel {
   return {
     id: tagValue(event, "d") ?? "",
@@ -147,9 +164,14 @@ export class BuzzClient {
 
   async listChannels(): Promise<Channel[]> {
     const events = await this.query([{ kinds: [39000] }]);
+    // DM conversations are 39000 events too (tagged ["t","dm"]); they are
+    // surfaced by listDirectMessages instead, not the regular channel list.
     // A channel with no `d` tag has no usable identifier: it would collide with
     // other such channels as a list key and query messages with an empty h tag.
-    return events.map(toChannel).filter((channel) => channel.id !== "");
+    return events
+      .filter((event) => !isDmChannel(event))
+      .map(toChannel)
+      .filter((channel) => channel.id !== "");
   }
 
   /**
@@ -271,14 +293,29 @@ export class BuzzClient {
 
   /**
    * The DM conversations we are part of. A Buzz DM is a private channel rather
-   * than an encrypted envelope, so a conversation is a kind:41001 event whose
-   * `d` tag is the channel id that messages are then sent into normally.
+   * than an encrypted envelope: a conversation is a kind:39000 channel-metadata
+   * event carrying a `["t","dm"]` tag, one `["p", <participant>]` tag per
+   * participant (including us), and a `d` tag that is the channel id messages
+   * are then sent into normally, same as any other channel.
+   *
+   * Kind 41001 was the first hypothesis and is wrong: it was tried against
+   * this relay's HTTP bridge with a `#p` filter, with only a `limit`, and
+   * with no filter at all, and every variation returned zero events even
+   * though the desktop app shows the conversations. Do not restore a 41001
+   * query here.
+   *
+   * The query below asks for every kind:39000 event, with no server-side `#t`
+   * or `#p` filter: this project has now been burned twice by assuming
+   * unverified relay filter semantics, and `{kinds:[39000]}` is a filter
+   * that has actually been proven to work. DM channels that include us are
+   * picked out client-side instead.
    */
   async listDirectMessages(): Promise<DirectMessage[]> {
     const me = getPublicKeyHex(this.secretKey);
-    const events = await this.query([{ kinds: [41001], "#p": [me] }]);
+    const events = await this.query([{ kinds: [39000] }]);
 
     const conversations = events
+      .filter((event) => isDmChannel(event) && hasParticipant(event, me))
       .map((event) => ({
         channelId: tagValue(event, "d") ?? "",
         participants: event.tags
@@ -289,10 +326,11 @@ export class BuzzClient {
       // with an empty `h` tag, the same reason listChannels drops those.
       .filter((conversation) => conversation.channelId !== "");
 
-    // Kind 41001 is not in Nostr's replaceable ranges (unlike kind 39000
-    // channels), so nothing on the relay guarantees one event per channel id.
-    // Two events sharing a `d` tag would otherwise become a duplicate React
-    // key downstream; keep only the first one seen.
+    // Kind 39000 is parameterized-replaceable, so the relay already keeps at
+    // most one event per (kind, d) coordinate; this dedupe is a defensive
+    // backstop in case that guarantee is ever violated. Two events sharing a
+    // `d` tag would otherwise become a duplicate React key downstream; keep
+    // only the first one seen.
     const seenChannelIds = new Set<string>();
     const deduped = conversations.filter((conversation) => {
       if (seenChannelIds.has(conversation.channelId)) return false;

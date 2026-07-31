@@ -42,8 +42,8 @@ function dmEvent(channelId: string, participants: string[]): NostrEvent {
     id: channelId,
     pubkey: participants[0],
     created_at: 1000,
-    kind: 41001,
-    tags: [["d", channelId], ...participants.map((p) => ["p", p])],
+    kind: 39000,
+    tags: [["d", channelId], ["t", "dm"], ...participants.map((p) => ["p", p])],
     content: "",
     sig: "s",
   };
@@ -246,6 +246,29 @@ describe("BuzzClient.listChannels", () => {
     ]);
     const channels = await client.listChannels();
     expect(channels).toEqual([{ id: "uuid-1", name: "general", about: undefined }]);
+  });
+
+  it("excludes a DM channel (tagged t=dm) and keeps a normal channel", async () => {
+    const client = new BuzzClient("https://relay.test", SK);
+    vi.spyOn(client, "query").mockResolvedValue([
+      ev({
+        kind: 39000,
+        tags: [
+          ["d", "dm-channel"],
+          ["name", "DM"],
+          ["t", "dm"],
+        ],
+      }),
+      ev({
+        kind: 39000,
+        tags: [
+          ["d", "normal-channel"],
+          ["name", "general"],
+        ],
+      }),
+    ]);
+    const channels = await client.listChannels();
+    expect(channels.map((c) => c.id)).toEqual(["normal-channel"]);
   });
 });
 
@@ -739,7 +762,7 @@ describe("listDirectMessages", () => {
     ]);
     const dms = await client.listDirectMessages();
 
-    expect(calls[0].body).toEqual([{ kinds: [41001], "#p": [me] }]);
+    expect(calls[0].body).toEqual([{ kinds: [39000] }]);
     expect(dms).toEqual([{ channelId: "chan-1", participants: ["aa".repeat(32)], name: "Ada" }]);
   });
 
@@ -771,7 +794,16 @@ describe("listDirectMessages", () => {
   it("drops a conversation with no d tag, which has no usable channel id", async () => {
     const me = ownPubkey();
     const { client } = clientWithResponses([
-      [{ ...dmEvent("chan-5", [me]), tags: [["p", me]] }, dmEvent("chan-6", [me])],
+      [
+        {
+          ...dmEvent("chan-5", [me]),
+          tags: [
+            ["t", "dm"],
+            ["p", me],
+          ],
+        },
+        dmEvent("chan-6", [me]),
+      ],
     ]);
     const dms = await client.listDirectMessages();
     expect(dms.map((d) => d.channelId)).toEqual(["chan-6"]);
@@ -797,7 +829,7 @@ describe("listDirectMessages", () => {
     const me = ownPubkey();
     const malformed: NostrEvent = {
       ...dmEvent("chan-9", [me, "aa".repeat(32)]),
-      tags: [["d", "chan-9"], ["p", me], ["p"], ["p", "aa".repeat(32)]],
+      tags: [["d", "chan-9"], ["t", "dm"], ["p", me], ["p"], ["p", "aa".repeat(32)]],
     };
     const { client } = clientWithResponses([[malformed], [profileEvent("aa".repeat(32), '{"name":"Ada"}')]]);
     const dms = await client.listDirectMessages();
@@ -813,6 +845,58 @@ describe("listDirectMessages", () => {
     const dms = await client.listDirectMessages();
     expect(dms.map((d) => d.channelId)).toEqual(["chan-10"]);
     expect(dms[0].participants).toEqual(["aa".repeat(32)]);
+  });
+
+  it("ignores a DM channel whose p tags do not include us", async () => {
+    const notOurs = dmEvent("chan-11", ["aa".repeat(32), "bb".repeat(32)]);
+    const { client } = clientWithResponses([[notOurs]]);
+    const dms = await client.listDirectMessages();
+    expect(dms).toEqual([]);
+  });
+
+  it("ignores a normal (non-DM) 39000 channel", async () => {
+    const me = ownPubkey();
+    const normalChannel: NostrEvent = {
+      id: "chan-12",
+      pubkey: me,
+      created_at: 1000,
+      kind: 39000,
+      tags: [
+        ["d", "chan-12"],
+        ["name", "general"],
+        ["p", me],
+      ],
+      content: "",
+      sig: "s",
+    };
+    const { client } = clientWithResponses([[normalChannel]]);
+    const dms = await client.listDirectMessages();
+    expect(dms).toEqual([]);
+  });
+
+  it("handles a DM channel carrying valueless tags without throwing", async () => {
+    const me = ownPubkey();
+    const withValuelessTags: NostrEvent = {
+      id: "chan-13",
+      pubkey: me,
+      created_at: 1000,
+      kind: 39000,
+      tags: [
+        ["d", "chan-13"],
+        ["name", "DM"],
+        ["private"],
+        ["hidden"],
+        ["p", me],
+        ["p", "aa".repeat(32)],
+        ["closed"],
+        ["t", "dm"],
+      ],
+      content: "",
+      sig: "s",
+    };
+    const { client } = clientWithResponses([[withValuelessTags], [profileEvent("aa".repeat(32), '{"name":"Ada"}')]]);
+    const dms = await client.listDirectMessages();
+    expect(dms).toEqual([{ channelId: "chan-13", participants: ["aa".repeat(32)], name: "Ada" }]);
   });
 });
 
