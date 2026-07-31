@@ -4,7 +4,7 @@
 ![React](https://img.shields.io/badge/React-black?logo=react&style=flat)
 ![TypeScript](https://img.shields.io/badge/TypeScript-black?logo=typescript&style=flat)
 
-Browse channels, search messages, post, react, and set your status in [Buzz](https://buzz.xyz/) directly from your command bar.
+Browse channels, search messages, post, send direct messages, react, and set your status in [Buzz](https://buzz.xyz/) directly from your command bar.
 
 ![Buzz for Raycast Screenshot](./metadata/buzz-1.png)
 
@@ -15,7 +15,7 @@ Buzz is a self-hostable workspace where humans and agents build together, on a r
 - Browse every channel on your relay and drill into its recent messages
 - Full-text search across the channels you can access
 - Open a message or a channel straight in the Buzz app
-- Post a message to any channel without leaving Raycast
+- Post a message to any channel, an existing direct-message conversation, or a person or agent you find by name, without leaving Raycast
 - React to a message with a NIP-25 like
 - Set your user status from a list of reusable presets, or type a custom one, with an optional emoji
 - Requests signed locally with NIP-98; your private key never leaves your machine
@@ -26,7 +26,7 @@ Buzz is a self-hostable workspace where humans and agents build together, on a r
 | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Search Channels` | Open a channel in Buzz, drill into its messages (root messages only, each showing its reply count, matching the Buzz app) to read and react, or copy its id |
 | `Search Messages` | Full-text search across the channels you can access, and open a hit in Buzz                                                                                 |
-| `Send Message`    | Post a message to a channel you pick from a dropdown                                                                                                        |
+| `Send Message`    | Post a message to a channel, an existing conversation, or a person or agent found by name                                                                   |
 | `Set Status`      | View your current status, apply or manage reusable presets, or set a custom one                                                                             |
 
 ## Setup
@@ -50,9 +50,10 @@ Your key is stored by Raycast as a password preference and is never transmitted 
 
 ## Requirements and limits
 
-This version speaks to the relay over HTTP only, which covers everything the commands above need. The following require an authenticated WebSocket connection (NIP-42) and are not available yet:
+This version speaks to the relay over HTTP only, which covers everything the commands above need, including direct messages: on Buzz a direct message is a private channel rather than an end-to-end encrypted envelope, so opening one and sending into it both work over the same authenticated HTTP bridge as everything else. Privacy for a direct message is enforced by the relay's access control, not by encryption, so the relay itself can read the content of your messages.
 
-- Direct messages, which additionally need NIP-17 gift-wrap encryption
+The following require an authenticated WebSocket connection (NIP-42) and are not available yet:
+
 - Presence, which the relay accepts only over WebSocket
 - A live or menu bar feed, and unread tracking
 
@@ -80,6 +81,8 @@ There is also an end-to-end smoke test that runs against a real relay. It lists 
 ```bash
 BUZZ_RELAY_URL=https://relay.example.com BUZZ_PRIVATE_KEY=nsec1... npm run smoke
 ```
+
+Set `BUZZ_SMOKE_DM_PUBKEY` as well to also exercise the direct-message path (opening a conversation, confirming it is idempotent, and confirming it is listed). That publishes a real event the other party will see, so it is opt-in rather than automatic; set it to your own pubkey to run the check without involving anyone else.
 
 ## Contributing
 
