@@ -3,11 +3,21 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
-import { showToast, popToRoot, Toast } from "@raycast/api";
-import type { Channel } from "./lib/types";
+import { showToast, Toast } from "@raycast/api";
+// `push` is a stub-only test helper that the real @raycast/api package does
+// not declare, so it is imported by relative path rather than through the
+// "@raycast/api" specifier (which vitest aliases to this same file for
+// runtime resolution; see vitest.config.ts). This keeps `tsc` type-checking
+// the rest of the import against the real package's types.
+import { push } from "../test/raycast-api-stub";
+import type { Channel, DirectMessage, Person } from "./lib/types";
 
-const mocks = vi.hoisted(() => ({ getClient: vi.fn() }));
+const mocks = vi.hoisted(() => ({ getClient: vi.fn(), searchPeople: vi.fn() }));
 vi.mock("./lib/preferences", () => ({ getClient: mocks.getClient }));
+vi.mock("./lib/directory", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./lib/directory")>()),
+  searchPeople: mocks.searchPeople,
+}));
 
 import Command from "./send-message";
 
@@ -15,211 +25,241 @@ afterEach(cleanup);
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getClient.mockReset();
+  mocks.searchPeople.mockReset();
+  mocks.searchPeople.mockResolvedValue([]);
 });
 
 const CHANNELS: Channel[] = [
-  { id: "uuid-1", name: "general" },
-  { id: "uuid-2", name: "random" },
+  { id: "chan-1", name: "general" },
+  { id: "chan-2", name: "random" },
 ];
+
+const DMS: DirectMessage[] = [{ channelId: "dm-1", participants: ["aa".repeat(32)], name: "Ada" }];
+
+const PEOPLE: Person[] = [{ pubkey: "bb".repeat(32), name: "Bo" }];
 
 function fakeClient(overrides: Record<string, unknown> = {}) {
   return {
     listChannels: vi.fn(async () => CHANNELS),
+    listDirectMessages: vi.fn(async () => DMS),
+    openDirectMessage: vi.fn(async () => "opened-chan"),
     sendMessage: vi.fn(async () => undefined),
     ...overrides,
   };
 }
 
-/** Wait for the channel dropdown to finish populating before interacting. */
-async function ready(expectedOptions: number) {
-  await waitFor(() =>
-    expect(screen.getByTestId("field-channelId").querySelectorAll("option")).toHaveLength(expectedOptions),
+function rows() {
+  return Array.from(screen.getAllByTestId("list-item"));
+}
+
+function rowTitled(title: string) {
+  const row = rows().find((r) => r.getAttribute("data-title") === title);
+  if (!row) throw new Error(`no row titled ${title}; have ${rows().map((r) => r.getAttribute("data-title"))}`);
+  return row;
+}
+
+function search(text: string) {
+  fireEvent.change(screen.getByTestId("search-bar"), { target: { value: text } });
+}
+
+/** Click the named action inside a given row. */
+function act(title: string, actionTitle: string) {
+  const action = Array.from(rowTitled(title).querySelectorAll("[data-testid='action']")).find(
+    (a) => a.getAttribute("data-title") === actionTitle,
   );
+  if (!action) throw new Error(`no action ${actionTitle} in row ${title}`);
+  fireEvent.click(action);
 }
 
-function typeMessage(text: string) {
-  fireEvent.change(screen.getByTestId("field-content"), { target: { value: text } });
-}
-
-function submit() {
-  fireEvent.click(screen.getByTestId("submit"));
+async function loaded() {
+  await waitFor(() => expect(rowTitled("general")).toBeTruthy());
 }
 
 describe("Send Message", () => {
-  it("offers every channel the relay returned", async () => {
+  it("lists channels and existing conversations in their own sections", async () => {
     mocks.getClient.mockReturnValue(fakeClient());
     render(<Command />);
-    await ready(2);
-    const options = Array.from(screen.getByTestId("field-channelId").querySelectorAll("option"));
-    expect(options.map((o) => o.value)).toEqual(["uuid-1", "uuid-2"]);
-    expect(options.map((o) => o.textContent)).toEqual(["general", "random"]);
+    await loaded();
+
+    expect(rowTitled("general").getAttribute("data-section")).toBe("Channels");
+    expect(rowTitled("random").getAttribute("data-section")).toBe("Channels");
+    expect(rowTitled("Ada").getAttribute("data-section")).toBe("Direct Messages");
   });
 
-  it("labels a nameless channel with its id in the dropdown", async () => {
-    mocks.getClient.mockReturnValue(fakeClient({ listChannels: vi.fn(async () => [{ id: "uuid-3", name: "" }]) }));
+  it("labels a nameless channel with its id", async () => {
+    mocks.getClient.mockReturnValue(fakeClient({ listChannels: vi.fn(async () => [{ id: "chan-9", name: "" }]) }));
     render(<Command />);
-    await ready(1);
-    expect(screen.getByTestId("field-channelId").querySelector("option")).toHaveTextContent("uuid-3");
+    await waitFor(() => expect(rowTitled("chan-9")).toBeTruthy());
   });
 
-  it("sends the typed message to the selected channel", async () => {
-    const client = fakeClient();
-    mocks.getClient.mockReturnValue(client);
+  it("shows no People section until something is typed", async () => {
+    mocks.getClient.mockReturnValue(fakeClient());
+    mocks.searchPeople.mockResolvedValue(PEOPLE);
     render(<Command />);
-    await ready(2);
+    await loaded();
 
-    fireEvent.change(screen.getByTestId("field-channelId"), { target: { value: "uuid-2" } });
-    typeMessage("hello from raycast");
-    submit();
-
-    await waitFor(() => expect(client.sendMessage).toHaveBeenCalledWith("uuid-2", "hello from raycast"));
+    expect(rows().some((r) => r.getAttribute("data-section") === "People")).toBe(false);
+    expect(mocks.searchPeople).not.toHaveBeenCalled();
   });
 
-  it("defaults to the first channel when none is picked explicitly", async () => {
-    const client = fakeClient();
-    mocks.getClient.mockReturnValue(client);
+  it("searches people once something is typed and lists them", async () => {
+    mocks.getClient.mockReturnValue(fakeClient());
+    mocks.searchPeople.mockResolvedValue(PEOPLE);
     render(<Command />);
-    await ready(2);
+    await loaded();
+    search("bo");
 
-    typeMessage("hi");
-    submit();
-
-    await waitFor(() => expect(client.sendMessage).toHaveBeenCalledWith("uuid-1", "hi"));
+    await waitFor(() => expect(rowTitled("Bo").getAttribute("data-section")).toBe("People"));
+    expect(mocks.searchPeople).toHaveBeenCalledWith(expect.anything(), "bo");
   });
 
-  it("confirms a sent message and returns to the root", async () => {
+  it("opens the composer for a channel with that channel's id", async () => {
     mocks.getClient.mockReturnValue(fakeClient());
     render(<Command />);
-    await ready(2);
+    await loaded();
+    act("general", "Write Message");
 
-    typeMessage("hi");
-    submit();
-
-    await waitFor(() =>
-      expect(showToast).toHaveBeenCalledWith(
-        expect.objectContaining({ style: Toast.Style.Success, title: "Message sent" }),
-      ),
-    );
-    expect(popToRoot).toHaveBeenCalled();
+    const pushed = await screen.findByTestId("pushed-view");
+    expect(pushed.querySelector("[data-testid='form-description']")?.textContent).toContain("general");
+    expect(pushed.querySelector("[data-testid='field-content']")).toBeTruthy();
   });
 
-  it("refuses an empty message without calling the relay", async () => {
+  it("opens the composer for an existing conversation without publishing anything", async () => {
     const client = fakeClient();
     mocks.getClient.mockReturnValue(client);
     render(<Command />);
-    await ready(2);
+    await loaded();
+    act("Ada", "Write Message");
 
-    submit();
-
-    await waitFor(() =>
-      expect(showToast).toHaveBeenCalledWith(
-        expect.objectContaining({ style: Toast.Style.Failure, title: "Message is empty" }),
-      ),
-    );
-    expect(client.sendMessage).not.toHaveBeenCalled();
-    expect(popToRoot).not.toHaveBeenCalled();
+    await screen.findByTestId("pushed-view");
+    expect(client.openDirectMessage).not.toHaveBeenCalled();
   });
 
-  it("refuses a whitespace-only message", async () => {
+  it("opens a conversation before composing when a person is picked", async () => {
     const client = fakeClient();
     mocks.getClient.mockReturnValue(client);
+    mocks.searchPeople.mockResolvedValue(PEOPLE);
     render(<Command />);
-    await ready(2);
+    await loaded();
+    search("bo");
+    await waitFor(() => expect(rowTitled("Bo")).toBeTruthy());
+    act("Bo", "Write Message");
 
-    typeMessage("    ");
-    submit();
-
-    await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.objectContaining({ title: "Message is empty" })));
-    expect(client.sendMessage).not.toHaveBeenCalled();
+    await waitFor(() => expect(client.openDirectMessage).toHaveBeenCalledWith("bb".repeat(32)));
+    await waitFor(() => expect(push).toHaveBeenCalled());
+    const view = push.mock.calls[0][0];
+    expect(view.props.channelId).toBe("opened-chan");
+    expect(view.props.destination).toBe("Bo");
   });
 
-  it("refuses to send when the relay exposed no channels", async () => {
-    // With an empty dropdown there is no channel id to publish against, so the
-    // message would go out with an empty h tag.
-    const client = fakeClient({ listChannels: vi.fn(async () => []) });
-    mocks.getClient.mockReturnValue(client);
-    render(<Command />);
-    await waitFor(() => expect(screen.getByTestId("form")).toHaveAttribute("data-loading", "false"));
-
-    typeMessage("hi");
-    submit();
-
-    await waitFor(() =>
-      expect(showToast).toHaveBeenCalledWith(
-        expect.objectContaining({ style: Toast.Style.Failure, title: "Pick a channel" }),
-      ),
-    );
-    expect(client.sendMessage).not.toHaveBeenCalled();
-  });
-
-  it("refuses to send while the channel list is still loading", async () => {
-    const client = fakeClient({ listChannels: vi.fn(() => new Promise(() => {})) });
-    mocks.getClient.mockReturnValue(client);
-    render(<Command />);
-    await waitFor(() => expect(screen.getByTestId("form")).toHaveAttribute("data-loading", "true"));
-
-    typeMessage("hi");
-    submit();
-
-    await waitFor(() =>
-      expect(showToast).toHaveBeenCalledWith(
-        expect.objectContaining({ style: Toast.Style.Failure, title: "Still loading channels" }),
-      ),
-    );
-    expect(client.sendMessage).not.toHaveBeenCalled();
-  });
-
-  it("reports a rejected send with the relay's reason and stays open", async () => {
+  it("does not compose when opening the conversation fails", async () => {
     const client = fakeClient({
-      sendMessage: vi.fn(async () => {
-        throw new Error("Relay rejected the request: restricted");
+      openDirectMessage: vi.fn(async () => {
+        throw new Error("Relay rejected the request: not allowed");
       }),
     });
     mocks.getClient.mockReturnValue(client);
+    mocks.searchPeople.mockResolvedValue(PEOPLE);
     render(<Command />);
-    await ready(2);
-
-    typeMessage("hi");
-    submit();
+    await loaded();
+    search("bo");
+    await waitFor(() => expect(rowTitled("Bo")).toBeTruthy());
+    act("Bo", "Write Message");
 
     await waitFor(() =>
-      expect(showToast).toHaveBeenCalledWith(
-        expect.objectContaining({
-          style: Toast.Style.Failure,
-          title: "Send failed",
-          message: "Relay rejected the request: restricted",
-        }),
-      ),
+      expect(showToast).toHaveBeenCalledWith({
+        style: Toast.Style.Failure,
+        title: "Could not open the conversation",
+        message: "Relay rejected the request: not allowed",
+      }),
     );
-    expect(popToRoot).not.toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
   });
 
-  it("stringifies a non-Error send failure", async () => {
+  it("reports a non-Error open failure as text", async () => {
     const client = fakeClient({
-      sendMessage: vi.fn(async () => {
+      openDirectMessage: vi.fn(async () => {
         throw "socket closed";
       }),
     });
     mocks.getClient.mockReturnValue(client);
+    mocks.searchPeople.mockResolvedValue(PEOPLE);
     render(<Command />);
-    await ready(2);
+    await loaded();
+    search("bo");
+    await waitFor(() => expect(rowTitled("Bo")).toBeTruthy());
+    act("Bo", "Write Message");
 
-    typeMessage("hi");
-    submit();
-
-    await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.objectContaining({ message: "socket closed" })));
+    await waitFor(() =>
+      expect(showToast).toHaveBeenCalledWith({
+        style: Toast.Style.Failure,
+        title: "Could not open the conversation",
+        message: "socket closed",
+      }),
+    );
   });
 
-  it("shows the error view when the channel list cannot be loaded", async () => {
+  it("keeps channels visible when the people search fails", async () => {
+    mocks.getClient.mockReturnValue(fakeClient());
+    mocks.searchPeople.mockRejectedValue(new Error("search unavailable"));
+    render(<Command />);
+    await loaded();
+    search("bo");
+
+    await waitFor(() =>
+      expect(showToast).toHaveBeenCalledWith({
+        style: Toast.Style.Failure,
+        title: "People search failed",
+        message: "search unavailable",
+      }),
+    );
+    expect(rowTitled("general")).toBeTruthy();
+  });
+
+  it("reports a non-Error search failure as text", async () => {
+    mocks.getClient.mockReturnValue(fakeClient());
+    mocks.searchPeople.mockRejectedValue("boom");
+    render(<Command />);
+    await loaded();
+    search("bo");
+
+    await waitFor(() =>
+      expect(showToast).toHaveBeenCalledWith({
+        style: Toast.Style.Failure,
+        title: "People search failed",
+        message: "boom",
+      }),
+    );
+  });
+
+  it("offers a copy action for a channel id", async () => {
+    mocks.getClient.mockReturnValue(fakeClient());
+    render(<Command />);
+    await loaded();
+    const copy = Array.from(rowTitled("general").querySelectorAll("[data-testid='action']")).find(
+      (a) => a.getAttribute("data-kind") === "copy",
+    );
+    expect(copy?.getAttribute("data-content")).toBe("chan-1");
+  });
+
+  it("renders the error view when the relay cannot be reached", async () => {
     mocks.getClient.mockImplementation(() => {
-      throw new Error("Set your Buzz relay URL (https:// or wss://) in extension preferences");
+      throw new Error("Cannot reach relay at https://relay.example");
     });
     render(<Command />);
     await waitFor(() =>
       expect(screen.getByTestId("empty-view")).toHaveAttribute(
         "data-description",
-        "Set your Buzz relay URL (https:// or wss://) in extension preferences",
+        "Cannot reach relay at https://relay.example",
       ),
     );
+  });
+
+  it("shows an empty state when there is nothing to write to", async () => {
+    mocks.getClient.mockReturnValue(
+      fakeClient({ listChannels: vi.fn(async () => []), listDirectMessages: vi.fn(async () => []) }),
+    );
+    render(<Command />);
+    await waitFor(() => expect(screen.getByTestId("empty-view")).toHaveAttribute("data-title", "Nothing to write to"));
   });
 });

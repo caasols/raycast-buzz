@@ -29,7 +29,7 @@
     {
       "name": "send-message",
       "title": "Send Message",
-      "description": "Post a message to a Buzz channel",
+      "description": "Post a message to a Buzz channel, conversation, or person",
       "mode": "view"
     },
     {
