@@ -53,6 +53,12 @@ export default function Command() {
       throttle
       onSearchTextChange={setQuery}
       searchBarPlaceholder="Search channels, conversations and people"
+      // Supplying onSearchTextChange implicitly turns Raycast's own filtering off
+      // (see the same rule in src/components/status-form.tsx), which would leave
+      // every channel and conversation on screen while typing. Restoring it here,
+      // with keepSectionOrder so Channels/Direct Messages/People stay in that
+      // order rather than being re-ranked by match quality.
+      filtering={{ keepSectionOrder: true }}
     >
       <List.EmptyView title="Nothing to write to" description="No channels or conversations on this relay" />
 
@@ -121,6 +127,13 @@ export default function Command() {
               title={person.name}
               subtitle={person.pubkey.slice(0, 8)}
               icon={Icon.PersonCircle}
+              // The relay already matched this person against the current query
+              // (possibly on a profile field other than their displayed name), so
+              // native filtering re-matching only the title could hide a row Raycast
+              // itself is responsible for surfacing. Forcing a match via keywords is
+              // correct here, not a workaround: it restates a result the search
+              // already returned.
+              keywords={[query]}
               actions={
                 <ActionPanel>
                   <Action

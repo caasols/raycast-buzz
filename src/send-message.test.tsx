@@ -62,6 +62,10 @@ function search(text: string) {
   fireEvent.change(screen.getByTestId("search-bar"), { target: { value: text } });
 }
 
+function typeMessage(text: string) {
+  fireEvent.change(screen.getByTestId("field-content"), { target: { value: text } });
+}
+
 /** Click the named action inside a given row. */
 function act(title: string, actionTitle: string) {
   const action = Array.from(rowTitled(title).querySelectorAll("[data-testid='action']")).find(
@@ -113,15 +117,39 @@ describe("Send Message", () => {
     expect(mocks.searchPeople).toHaveBeenCalledWith(expect.anything(), "bo");
   });
 
-  it("opens the composer for a channel with that channel's id", async () => {
+  it("hides the People section again once the search is cleared", async () => {
+    // usePromise retains its last resolved `data` when `execute` flips back to
+    // false (it only aborts the in-flight fetch, it does not clear the result),
+    // so the `hasQuery` gate on the section itself is what has to hide the
+    // stale rows, not the hook resetting `people.data` back to undefined.
     mocks.getClient.mockReturnValue(fakeClient());
+    mocks.searchPeople.mockResolvedValue(PEOPLE);
     render(<Command />);
     await loaded();
-    act("general", "Write Message");
+    search("bo");
+    await waitFor(() => expect(rowTitled("Bo")).toBeTruthy());
 
-    const pushed = await screen.findByTestId("pushed-view");
-    expect(pushed.querySelector("[data-testid='form-description']")?.textContent).toContain("general");
-    expect(pushed.querySelector("[data-testid='field-content']")).toBeTruthy();
+    search("");
+
+    await waitFor(() => expect(rows().some((r) => r.getAttribute("data-section") === "People")).toBe(false));
+  });
+
+  it("opens the composer for a channel with that channel's id", async () => {
+    // "random" (chan-2), not "general" (chan-1): picking the wrong row's id here
+    // would otherwise go unnoticed, since both rows exist and only "general"'s
+    // description was ever asserted before.
+    const client = fakeClient();
+    mocks.getClient.mockReturnValue(client);
+    render(<Command />);
+    await loaded();
+    act("random", "Write Message");
+
+    await screen.findByTestId("pushed-view");
+    expect(screen.getByTestId("form-description").textContent).toContain("random");
+    typeMessage("hello general");
+    fireEvent.click(screen.getByTestId("submit"));
+
+    await waitFor(() => expect(client.sendMessage).toHaveBeenCalledWith("chan-2", "hello general"));
   });
 
   it("opens the composer for an existing conversation without publishing anything", async () => {
@@ -133,6 +161,10 @@ describe("Send Message", () => {
 
     await screen.findByTestId("pushed-view");
     expect(client.openDirectMessage).not.toHaveBeenCalled();
+    typeMessage("hi Ada");
+    fireEvent.click(screen.getByTestId("submit"));
+
+    await waitFor(() => expect(client.sendMessage).toHaveBeenCalledWith("dm-1", "hi Ada"));
   });
 
   it("opens a conversation before composing when a person is picked", async () => {
@@ -253,6 +285,32 @@ describe("Send Message", () => {
         "Cannot reach relay at https://relay.example",
       ),
     );
+  });
+
+  it("renders the error view when a channel or conversation fetch rejects", async () => {
+    mocks.getClient.mockReturnValue(
+      fakeClient({
+        listDirectMessages: vi.fn(async () => {
+          throw new Error("Relay rejected the request: not allowed");
+        }),
+      }),
+    );
+    render(<Command />);
+    await waitFor(() =>
+      expect(screen.getByTestId("empty-view")).toHaveAttribute(
+        "data-description",
+        "Relay rejected the request: not allowed",
+      ),
+    );
+  });
+
+  it("asks Raycast for native filtering, since onSearchTextChange otherwise turns it off", async () => {
+    // The stub cannot reproduce Raycast's own filtering, so this only pins the
+    // prop the command passes rather than the filtering behaviour it produces.
+    mocks.getClient.mockReturnValue(fakeClient());
+    render(<Command />);
+    await loaded();
+    expect(screen.getByTestId("list")).toHaveAttribute("data-filtering", "true");
   });
 
   it("shows an empty state when there is nothing to write to", async () => {

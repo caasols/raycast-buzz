@@ -156,6 +156,9 @@ function ListItem(props: {
   accessories?: { text?: string; date?: Date; tag?: unknown; icon?: unknown }[];
   icon?: unknown;
   section?: string;
+  // Accepted so extensions can pass real Raycast keywords through unchanged;
+  // the stub does no native filtering, so there is nothing to match against here.
+  keywords?: string[];
 }) {
   return (
     <div
@@ -199,6 +202,7 @@ export function List(props: {
   searchBarPlaceholder?: string;
   onSearchTextChange?: (text: string) => void;
   throttle?: boolean;
+  filtering?: boolean | { keepSectionOrder: boolean };
 }) {
   const items: ReactNode[] = [];
   const emptyViews: ReactNode[] = [];
@@ -227,6 +231,13 @@ export function List(props: {
       data-testid="list"
       data-loading={String(Boolean(props.isLoading))}
       data-navigation-title={props.navigationTitle}
+      // The stub does no actual filtering (native Raycast filtering is not
+      // something jsdom can reproduce), so this pins the prop a command passes
+      // rather than the filtering behaviour itself: it exists so a regression
+      // that drops `filtering` back to Raycast's onSearchTextChange default
+      // (false) is still caught, even though what that default actually does
+      // to the rendered list is not something this stub can show.
+      data-filtering={String(Boolean(props.filtering))}
     >
       <input
         data-testid="search-bar"
