@@ -50,3 +50,19 @@ export interface UserStatus {
   text: string;
   emoji: string;
 }
+
+/** Someone (or some agent) who can be sent a direct message. */
+export interface Person {
+  pubkey: string;
+  /** Display name from their kind:0 profile, or a shortened pubkey. */
+  name: string;
+}
+
+/** An open DM conversation, which on Buzz is an ordinary private channel. */
+export interface DirectMessage {
+  channelId: string;
+  /** Participants other than us. Empty when the conversation is with ourselves. */
+  participants: string[];
+  /** Resolved participant names, joined, for the list row. */
+  name: string;
+}
