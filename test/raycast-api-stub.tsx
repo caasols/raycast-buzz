@@ -337,7 +337,12 @@ function FormDropdown(props: {
 
 FormDropdown.Item = FormDropdownItem;
 
-export function Form(props: { children?: ReactNode; actions?: ReactNode; isLoading?: boolean }) {
+export function Form(props: {
+  children?: ReactNode;
+  actions?: ReactNode;
+  isLoading?: boolean;
+  navigationTitle?: string;
+}) {
   const [values, setValues] = useState<FormValues>({});
   const setValue = (id: string, value: string) => setValues((prev) => ({ ...prev, [id]: value }));
 
