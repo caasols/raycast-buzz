@@ -17,8 +17,9 @@ export function parseOpenedChannelId(message: string): string | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(message.slice(RESPONSE_PREFIX.length));
-    // Stryker disable next-line BlockStatement: emptying this catch leaves
-    // `parsed` undefined, which the object check below turns into the same null.
+    // The catch-emptying mutant survives mutation testing and is equivalent:
+    // it leaves `parsed` undefined, which the object check below turns into
+    // the same null. (A Stryker disable comment cannot reach a catch block.)
   } catch {
     return null;
   }

@@ -182,8 +182,9 @@ async function readRelayError(res: Response): Promise<string> {
       // body was not JSON; fall through to the raw text
     }
     return text.slice(0, 200);
-    // Stryker disable next-line BlockStatement: emptying this catch makes the
-    // function return undefined, which the only caller treats exactly like "".
+    // The catch-emptying mutant survives mutation testing and is equivalent:
+    // it makes the function return undefined, which the only caller treats
+    // exactly like "". (A Stryker disable comment cannot reach a catch block.)
   } catch {
     return "";
   }
