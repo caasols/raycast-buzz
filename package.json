@@ -96,6 +96,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:mutation": "stryker run",
+    "test:mutation:full": "stryker run --force",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "smoke": "tsx scripts/smoke.ts"
   }
