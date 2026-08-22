@@ -25,6 +25,8 @@ export function profileName(content: string): string {
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);
+    // Stryker disable next-line BlockStatement: emptying this catch leaves
+    // `parsed` undefined, which the object check below turns into the same "".
   } catch {
     return "";
   }

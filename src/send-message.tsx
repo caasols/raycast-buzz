@@ -51,7 +51,8 @@ export default function Command() {
   const people = usePromise(
     async (q: string) => {
       try {
-        return await searchPeople(getClient(), q.trim());
+        // searchPeople trims its query itself, so q is passed through as-is.
+        return await searchPeople(getClient(), q);
       } catch (e) {
         await showToast({ style: Toast.Style.Failure, title: "People search failed", message: errorMessage(e) });
         return [] as Person[];

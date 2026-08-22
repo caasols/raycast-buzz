@@ -26,6 +26,7 @@ describe("ComposeMessage", () => {
   it("names the destination it will send to", () => {
     render(<ComposeMessage client={fakeClient()} channelId="chan-1" destination="general" />);
     expect(screen.getByTestId("form-description").textContent).toContain("general");
+    expect(screen.getByTestId("form")).toHaveAttribute("data-navigation-title", "Message general");
   });
 
   it("sends the typed message to the given channel", async () => {

@@ -18,6 +18,12 @@ describe("parseOpenedChannelId", () => {
     expect(parseOpenedChannelId('{"channel_id":"abc"}')).toBeNull();
   });
 
+  it("returns null when the prefix is the wrong word, even at the right length", () => {
+    // Nine characters of something else must not be sliced off and parsed as
+    // though the response: contract had been honoured.
+    expect(parseOpenedChannelId('reXponse:{"channel_id":"abc","created":true}')).toBeNull();
+  });
+
   it("returns null when the payload is not valid JSON", () => {
     expect(parseOpenedChannelId("response:{not json")).toBeNull();
   });

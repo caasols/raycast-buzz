@@ -44,8 +44,18 @@ describe("parseSecretKey", () => {
     expect(() => parseSecretKey("z".repeat(64))).toThrow();
   });
 
+  it("rejects a 65-character hex string, whichever end carries the extra digit", () => {
+    // Unanchored matching would accept these and silently truncate the key.
+    expect(() => parseSecretKey(`${HEX_KEY}0`)).toThrow();
+    expect(() => parseSecretKey(`0${HEX_KEY}`)).toThrow();
+  });
+
   it("rejects a malformed nsec", () => {
     expect(() => parseSecretKey("nsec1notarealkey")).toThrow();
+  });
+
+  it("reports a malformed nsec with its designed message, not a raw decoder error", () => {
+    expect(() => parseSecretKey("nsec1notarealkey")).toThrow("Invalid nsec key: could not decode the private key");
   });
 
   it("rejects a bech32 string that decodes to something other than a private key", async () => {
@@ -149,6 +159,11 @@ describe("buildNip98Header", () => {
   it("includes a nonce tag", () => {
     const ev = decode(buildNip98Header(URL, "POST", "[]", SK));
     expect(tagValue(ev, "nonce")).toBeTruthy();
+  });
+
+  it("keeps the event content empty, as NIP-98 requires", () => {
+    const ev = decode(buildNip98Header(URL, "POST", "[]", SK));
+    expect(ev.content).toBe("");
   });
 
   it("the Authorization base64 losslessly round-trips the signed event, and the payload hashes the body's UTF-8 bytes", () => {

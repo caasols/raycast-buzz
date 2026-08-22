@@ -115,6 +115,10 @@ describe("Send Message", () => {
 
     await waitFor(() => expect(rowTitled("Bo").getAttribute("data-section")).toBe("People"));
     expect(mocks.searchPeople).toHaveBeenCalledWith(expect.anything(), "bo");
+    // The row shows a shortened pubkey, and restates the query as a keyword so
+    // Raycast's native filter cannot hide a person the relay already matched.
+    expect(rowTitled("Bo").getAttribute("data-subtitle")).toBe("bbbbbbbb");
+    expect(rowTitled("Bo").getAttribute("data-keywords")).toBe("bo");
   });
 
   it("hides the People section again once the search is cleared", async () => {
@@ -407,6 +411,50 @@ describe("Send Message", () => {
     render(<Command />);
     await loaded();
     expect(screen.getByTestId("list")).toHaveAttribute("data-filtering", "true");
+    // keepSectionOrder keeps Channels/Direct Messages/People in that order
+    // instead of being re-ranked by match quality.
+    expect(screen.getByTestId("list")).toHaveAttribute("data-filtering-config", '{"keepSectionOrder":true}');
+  });
+
+  it("treats a whitespace-only query as no query at all", async () => {
+    mocks.getClient.mockReturnValue(
+      fakeClient({ listChannels: vi.fn(async () => []), listDirectMessages: vi.fn(async () => []) }),
+    );
+    mocks.searchPeople.mockResolvedValue(PEOPLE);
+    render(<Command />);
+    await waitFor(() => expect(screen.getByTestId("empty-view")).toHaveAttribute("data-title", "Nothing to write to"));
+
+    search("   ");
+
+    // Still the no-query copy, not "No matches", and no directory search fires.
+    await waitFor(() => expect(screen.getByTestId("empty-view")).toHaveAttribute("data-title", "Nothing to write to"));
+    expect(mocks.searchPeople).not.toHaveBeenCalled();
+  });
+
+  it("reports loading while either the relay lists or a people search is pending", async () => {
+    let resolveChannels!: (value: Channel[]) => void;
+    mocks.getClient.mockReturnValue(
+      fakeClient({
+        listChannels: vi.fn(() => new Promise<Channel[]>((resolve) => (resolveChannels = resolve))),
+        listDirectMessages: vi.fn(async () => []),
+      }),
+    );
+    let resolvePeople!: (value: Person[]) => void;
+    mocks.searchPeople.mockImplementation(() => new Promise<Person[]>((resolve) => (resolvePeople = resolve)));
+    render(<Command />);
+
+    // Phase 1: the initial channel list is still loading.
+    expect(screen.getByTestId("list")).toHaveAttribute("data-loading", "true");
+
+    resolveChannels(CHANNELS);
+    await waitFor(() => expect(screen.getByTestId("list")).toHaveAttribute("data-loading", "false"));
+
+    // Phase 2: a people search alone must report loading too.
+    search("bo");
+    await waitFor(() => expect(screen.getByTestId("list")).toHaveAttribute("data-loading", "true"));
+
+    resolvePeople([]);
+    await waitFor(() => expect(screen.getByTestId("list")).toHaveAttribute("data-loading", "false"));
   });
 
   it("shows an empty state when there is nothing to write to", async () => {

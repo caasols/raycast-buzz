@@ -19,10 +19,14 @@ export function getBuzzConfig(): BuzzConfig {
   // means a preference renamed in the manifest fails typecheck here instead of
   // silently arriving as undefined.
   const { relayUrl, privateKey } = getPreferenceValues<Preferences>();
+  // Stryker disable next-line StringLiteral: any non-URL fallback string fails
+  // the scheme check below with the same error as "", so the mutant is equivalent.
   const url = normalizeRelayUrl(relayUrl ?? "");
   if (!/^https?:\/\//i.test(url)) {
     throw new Error("Set your Buzz relay URL (https:// or wss://) in extension preferences");
   }
+  // Stryker disable next-line StringLiteral: any non-key fallback string makes
+  // parseSecretKey throw the same error as "", so the mutant is equivalent.
   const secretKey = parseSecretKey(privateKey ?? "");
   return { relayUrl: url, secretKey };
 }

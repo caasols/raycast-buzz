@@ -182,6 +182,26 @@ describe("Set Status list", () => {
     await waitFor(() => expect(client.clearStatus).toHaveBeenCalled());
   });
 
+  it("confirms a clear with its toast and refreshes the row to No status", async () => {
+    const getStatus = vi.fn(async (): Promise<{ text: string; emoji: string } | null> => null);
+    getStatus.mockResolvedValueOnce({ text: "in a meeting", emoji: "" });
+    const client = fakeClient({ getStatus });
+    mocks.getClient.mockReturnValue(client);
+    render(<Command />);
+    const rendered = await items();
+    expect(rendered[0]).toHaveAttribute("data-title", "in a meeting");
+
+    fireEvent.click(action("Clear Status")!);
+
+    await waitFor(() =>
+      expect(showToast).toHaveBeenCalledWith(
+        expect.objectContaining({ style: Toast.Style.Success, title: "Status cleared" }),
+      ),
+    );
+    // Without the refetch the row keeps showing the status that was just cleared.
+    await waitFor(() => expect(screen.getAllByTestId("list-item")[0]).toHaveAttribute("data-title", "No status"));
+  });
+
   it("reports a failed clear", async () => {
     mocks.getClient.mockReturnValue(
       fakeClient({
@@ -225,8 +245,9 @@ describe("Set Status list", () => {
     await waitFor(() =>
       expect(confirmAlert).toHaveBeenCalledWith(
         expect.objectContaining({
+          title: "Delete Preset",
           message: expect.stringContaining(seeded[0].text),
-          primaryAction: expect.objectContaining({ style: Alert.ActionStyle.Destructive }),
+          primaryAction: expect.objectContaining({ title: "Delete", style: Alert.ActionStyle.Destructive }),
         }),
       ),
     );
@@ -410,6 +431,8 @@ describe("Set Status list", () => {
     fireEvent.change(screen.getByTestId("field-text"), { target: { value: "heads down" } });
     fireEvent.click(screen.getByTestId("submit"));
     await waitFor(() => expect(client.setStatus).toHaveBeenCalledWith("heads down", undefined));
+    // The form closes itself once the status is set.
+    await waitFor(() => expect(pop).toHaveBeenCalled());
   });
 
   it("does not pop when the custom status submit fails, and keeps the form open", async () => {
@@ -537,6 +560,8 @@ describe("Set Status list", () => {
     await waitFor(() => expect(screen.getAllByTestId("list-item")).toHaveLength(before.length + 1));
     const rendered = screen.getAllByTestId("list-item");
     expect(rendered[rendered.length - 1]).toHaveAttribute("data-title", "brand new preset");
+    // The form closes itself once the preset is saved.
+    await waitFor(() => expect(pop).toHaveBeenCalled());
   });
 
   it("reports a failed preset creation and does not pop or lose the form", async () => {
@@ -585,5 +610,7 @@ describe("Set Status list", () => {
     fireEvent.change(screen.getByTestId("field-text"), { target: { value: "renamed preset" } });
     fireEvent.click(screen.getByTestId("submit"));
     await waitFor(() => expect(screen.getAllByTestId("list-item")[1]).toHaveAttribute("data-title", "renamed preset"));
+    // The form closes itself once the edit is saved.
+    await waitFor(() => expect(pop).toHaveBeenCalled());
   });
 });

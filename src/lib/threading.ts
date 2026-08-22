@@ -11,6 +11,10 @@ export interface ThreadReference {
 
 export function getThreadReference(tags: string[][]): ThreadReference {
   const eventTags = tags.filter((tag) => tag[0] === "e" && typeof tag[1] === "string");
+  // Stryker disable next-line BlockStatement: with no e tags, `replyTag` below
+  // is null and the second early return produces the identical result, so
+  // emptying this block is unobservable. The return stays for parity with the
+  // desktop implementation this file mirrors.
   if (eventTags.length === 0) {
     return { parentId: null, rootId: null };
   }
@@ -19,14 +23,12 @@ export function getThreadReference(tags: string[][]): ThreadReference {
   if (!replyTag) {
     return { parentId: null, rootId: null };
   }
-  // The eventTags filter above keeps only tags whose second element is a string,
-  // so replyTag[1] is always a string here and the ?? null fallback cannot fire.
-  // The pragma below only suppresses coverage for its own line because it sits
-  // mid-line, deliberately: if this is ever reformatted so the comment starts on
-  // its own line, c8 will treat it as covering the next line instead, silently
-  // swallowing that line's branches. That exact failure mode is why two other
-  // pragmas were already removed from this file; do not reformat it.
-  const parentId = replyTag[1] ?? /* c8 ignore next */ null;
+  // The eventTags filter above keeps only tags whose second element is a
+  // string, so replyTag[1] is always a string here. There is deliberately no
+  // `?? null` fallback: it could never fire, and the mid-line coverage pragma
+  // it used to need is not honoured by vitest 4's AST-based v8 provider, which
+  // reported the dead branch as uncovered.
+  const parentId = replyTag[1];
   return { parentId, rootId: rootTag?.[1] ?? parentId };
 }
 

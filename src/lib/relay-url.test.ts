@@ -34,6 +34,12 @@ describe("normalizeRelayUrl", () => {
     expect(normalizeRelayUrl("WSS://relay.example.com")).toBe("https://relay.example.com");
   });
 
+  it("only rewrites a scheme at the very start of the URL", () => {
+    // An unanchored match would rewrite these into https://host and http://host.
+    expect(normalizeRelayUrl("xwss://host")).toBe("xwss://host");
+    expect(normalizeRelayUrl("xws://host")).toBe("xws://host");
+  });
+
   it("returns an empty string for empty input", () => {
     expect(normalizeRelayUrl("")).toBe("");
   });

@@ -342,9 +342,9 @@ describe("ChannelMessages react action", () => {
     });
     render(<ChannelMessages client={client} channel={CHANNEL} />);
     const rendered = await items();
-    const accessories = rendered[0].getAttribute("data-accessories") ?? "";
-    expect(accessories).not.toContain("repl");
-    expect(accessories).toContain(new Date(1700000000 * 1000).toISOString());
+    // Exact equality: the timestamp must be the ONLY accessory, so a stray
+    // extra entry cannot ride along unnoticed.
+    expect(rendered[0]).toHaveAttribute("data-accessories", new Date(1700000000 * 1000).toISOString());
   });
 
   it("puts the reply count accessory before the timestamp accessory", async () => {

@@ -11,6 +11,8 @@ const HEX_64 = /^[0-9a-f]{64}$/i;
  * echoes the provided key material.
  */
 export function parseSecretKey(input: string): Uint8Array {
+  // Stryker disable next-line StringLiteral: any non-key fallback string fails
+  // both branches below with the same error as "", so the mutant is equivalent.
   const trimmed = (input ?? "").trim();
   if (trimmed.startsWith("nsec1")) {
     let decoded;

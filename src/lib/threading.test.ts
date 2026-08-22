@@ -42,6 +42,33 @@ describe("getThreadReference", () => {
     expect(getThreadReference(tags).parentId).toBe(PARENT);
   });
 
+  it("ignores a reply marker on a tag that is not an e tag", () => {
+    // A p tag carrying "reply" in the marker position must not read as a
+    // thread reference; only e tags participate.
+    expect(getThreadReference([["p", PARENT, "", "reply"]])).toEqual({ parentId: null, rootId: null });
+  });
+
+  it("ignores a reply-marked e tag whose id is not a string, even beside a valid root tag", () => {
+    // The malformed reply tag must be dropped entirely: were it kept, the root
+    // tag would still be read and rootId would leak through as ROOT.
+    const tags = [
+      ["e", ROOT, "", "root"],
+      ["e", undefined, "", "reply"],
+    ] as unknown as string[][];
+    expect(getThreadReference(tags)).toEqual({ parentId: null, rootId: null });
+  });
+
+  it("takes the root only from a root-marked tag, not from any earlier e tag", () => {
+    const OTHER = "c".repeat(64);
+    const tags = [
+      ["e", OTHER],
+      ["e", PARENT, "", "reply"],
+    ];
+    // No root marker anywhere: the unmarked OTHER tag must not be mistaken for
+    // one, so rootId falls back to the parent.
+    expect(getThreadReference(tags)).toEqual({ parentId: PARENT, rootId: PARENT });
+  });
+
   it("handles a reply tag whose id is an empty string", () => {
     const tags = [["e", "", "", "reply"]];
     expect(getThreadReference(tags)).toEqual({ parentId: "", rootId: "" });
@@ -64,6 +91,8 @@ describe("isBroadcastReply", () => {
     expect(isBroadcastReply([["broadcast", "1"]])).toBe(true);
     expect(isBroadcastReply([["broadcast", "0"]])).toBe(false);
     expect(isBroadcastReply([["h", "chan"]])).toBe(false);
+    // A "1" under any other tag name must not read as a broadcast marker.
+    expect(isBroadcastReply([["priority", "1"]])).toBe(false);
   });
 });
 

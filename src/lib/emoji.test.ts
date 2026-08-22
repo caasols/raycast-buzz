@@ -14,6 +14,13 @@ describe("EMOJI dataset", () => {
     expect(new Set(EMOJI.map((e) => e.char)).size).toBe(EMOJI.length);
   });
 
+  it("gives every entry a real emoji character, never an empty or ASCII one", () => {
+    // Uniqueness alone tolerates a single blanked char; each one is checked.
+    for (const entry of EMOJI) {
+      expect(entry.char).toMatch(/^\P{ASCII}/u);
+    }
+  });
+
   it("wraps every shortcode in colons", () => {
     for (const entry of EMOJI) {
       expect(entry.shortcode).toMatch(/^:[a-z0-9_+-]+:$/);
@@ -116,6 +123,23 @@ describe("searchEmoji", () => {
   it("ranks a prefix match above a mere subsequence", () => {
     const results = shortcodes("bee");
     expect(results[0]).toBe(":bee:");
+  });
+
+  it("ranks a prefix match above a substring match, beating dataset order", () => {
+    // "dart" starts with "dar"; :calendar: only contains it ("calendar"), and
+    // sits earlier in the dataset, so this order only holds if the prefix tier
+    // outranks the substring tier. "calendar" also *ends* with "dar", so an
+    // ends-with comparison would flip this too.
+    const results = shortcodes("dar");
+    expect(results.indexOf(":dart:")).toBeLessThan(results.indexOf(":calendar:"));
+  });
+
+  it("ranks a substring match above a mere subsequence, beating dataset order", () => {
+    // "discussion" contains "sc"; :spiral_calendar: only matches it as a
+    // subsequence (s...c) and sits earlier in the dataset, so this order only
+    // holds if the substring tier outranks the subsequence tier.
+    const results = shortcodes("sc");
+    expect(results.indexOf(":speech_balloon:")).toBeLessThan(results.indexOf(":spiral_calendar:"));
   });
 
   it("returns nothing when nothing matches", () => {

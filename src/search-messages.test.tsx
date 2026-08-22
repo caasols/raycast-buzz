@@ -102,6 +102,9 @@ describe("Search Messages", () => {
     type("   ");
     await waitFor(() => expect(screen.getByTestId("list")).toBeInTheDocument());
     expect(client.searchMessages).not.toHaveBeenCalled();
+    // Whitespace is no query: the prompt stays, rather than "No matches"
+    // claiming a search that never ran found nothing.
+    expect(screen.getByTestId("empty-view")).toHaveAttribute("data-title", "Search Buzz messages");
   });
 
   it("renders the matching messages with a truncated author", async () => {
@@ -123,6 +126,8 @@ describe("Search Messages", () => {
     });
     expect(rendered.map((el) => el.dataset.title)).toEqual(["hello world", "hello again"]);
     expect(rendered[0]).toHaveAttribute("data-subtitle", "abcdef01");
+    // Exactly one accessory: the message date, converted from unix seconds.
+    expect(rendered[0]).toHaveAttribute("data-accessories", new Date(1700000000 * 1000).toISOString());
   });
 
   it("surfaces a relay failure through the error view", async () => {

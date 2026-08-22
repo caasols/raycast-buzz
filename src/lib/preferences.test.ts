@@ -50,6 +50,16 @@ describe("getBuzzConfig", () => {
     expect(() => getBuzzConfig()).toThrow(/relay URL/i);
   });
 
+  it("rejects a URL whose scheme is buried mid-string rather than leading", () => {
+    setPreferences("xhttps://relay.example.com", HEX_KEY);
+    expect(() => getBuzzConfig()).toThrow(/relay URL/i);
+  });
+
+  it("accepts a plain http:// relay URL", () => {
+    setPreferences("http://localhost:8080", HEX_KEY);
+    expect(getBuzzConfig().relayUrl).toBe("http://localhost:8080");
+  });
+
   it("rejects preferences that were never filled in", () => {
     // Raycast returns undefined, not "", for an untouched required preference.
     mocks.getPreferenceValues.mockReturnValue({});

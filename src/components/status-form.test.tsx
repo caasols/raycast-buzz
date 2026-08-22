@@ -149,6 +149,24 @@ describe("StatusForm", () => {
     expect(values).toContain("\u{1F41D}");
   });
 
+  it("pins only the selection itself: None plus the one chosen emoji when nothing matches", () => {
+    render(<StatusForm submitTitle="Save Preset" initialEmoji={"\u{1F41D}"} onSubmit={vi.fn()} />);
+    fireEvent.change(screen.getByTestId("field-emoji-search"), { target: { value: "zzzzqqqq" } });
+    // Exactly two options: pinning must not resurrect the whole dataset.
+    const values = Array.from(screen.getByTestId("field-emoji").querySelectorAll("option")).map((o) => o.value);
+    expect(values).toEqual(["", "\u{1F41D}"]);
+  });
+
+  it("does not render the selection twice when it still matches the query", () => {
+    render(<StatusForm submitTitle="Set Status" onSubmit={vi.fn()} />);
+    // An empty query matches everything, so the chosen bee is already among the
+    // matches and pinning it again would duplicate its option (and React key).
+    fireEvent.change(screen.getByTestId("field-emoji"), { target: { value: "\u{1F41D}" } });
+    const values = Array.from(screen.getByTestId("field-emoji").querySelectorAll("option")).map((o) => o.value);
+    expect(values).toHaveLength(EMOJI.length + 1);
+    expect(new Set(values).size).toBe(values.length);
+  });
+
   it("submits the pinned emoji even after a query that excludes it from the visible matches", async () => {
     const onSubmit = vi.fn(async () => undefined);
     render(<StatusForm submitTitle="Save Preset" initialEmoji={"\u{1F41D}"} initialText="busy" onSubmit={onSubmit} />);

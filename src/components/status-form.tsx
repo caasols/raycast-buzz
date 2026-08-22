@@ -24,6 +24,8 @@ export function StatusForm({
   onSubmit: (values: { emoji: string; text: string }) => Promise<void>;
 }) {
   const [query, setQuery] = useState("");
+  // Stryker disable next-line StringLiteral: with no initial emoji, any
+  // fallback string pins nothing (it matches no entry), same as "".
   const [selected, setSelected] = useState(initialEmoji ?? "");
 
   // Raycast's own dropdown filtering cannot find these entries (see
@@ -38,6 +40,8 @@ export function StatusForm({
   const visible = selected && !matches.some((e) => e.char === selected) ? [...pinned(selected), ...matches] : matches;
 
   async function handleSubmit(values: { emoji: string; text: string }) {
+    // Stryker disable next-line MethodExpression: dropdown values are emoji
+    // characters that never carry whitespace, so this trim is purely defensive.
     const emoji = values.emoji.trim();
     const text = values.text.trim();
     if (!emoji && !text) {
@@ -58,7 +62,7 @@ export function StatusForm({
       <Form.Dropdown
         id="emoji"
         title="Emoji"
-        defaultValue={initialEmoji ?? ""}
+        defaultValue={initialEmoji}
         placeholder="Search by name or keyword"
         onSearchTextChange={setQuery}
         onChange={setSelected}

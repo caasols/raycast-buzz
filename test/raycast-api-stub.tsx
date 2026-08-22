@@ -156,8 +156,9 @@ function ListItem(props: {
   accessories?: { text?: string; date?: Date; tag?: unknown; icon?: unknown }[];
   icon?: unknown;
   section?: string;
-  // Accepted so extensions can pass real Raycast keywords through unchanged;
-  // the stub does no native filtering, so there is nothing to match against here.
+  // The stub does no native filtering, so keywords have nothing to match
+  // against here; they are rendered as an attribute instead so a test can pin
+  // that a row passes the keywords Raycast's real filter would receive.
   keywords?: string[];
 }) {
   return (
@@ -167,6 +168,7 @@ function ListItem(props: {
       data-subtitle={props.subtitle}
       data-icon={iconAttr(props.icon)}
       data-section={props.section}
+      data-keywords={props.keywords?.join(" ")}
       data-accessories={props.accessories?.map((a) => a.text ?? (a.date ? a.date.toISOString() : "")).join(" ")}
     >
       {props.actions}
@@ -248,6 +250,9 @@ export function List(props: {
       data-native-filtering={String(
         props.filtering === undefined ? props.onSearchTextChange === undefined : Boolean(props.filtering),
       )}
+      /* The full filtering prop, serialized, so options like keepSectionOrder
+         are assertable; the boolean data-filtering above collapses them away. */
+      data-filtering-config={props.filtering === undefined ? undefined : JSON.stringify(props.filtering)}
     >
       <input
         data-testid="search-bar"
@@ -372,7 +377,7 @@ export function Form(props: {
 
   return (
     <FormContext.Provider value={{ values, setValue }}>
-      <div data-testid="form" data-loading={String(Boolean(props.isLoading))}>
+      <div data-testid="form" data-loading={String(Boolean(props.isLoading))} data-navigation-title={props.navigationTitle}>
         {props.children}
         {props.actions}
       </div>

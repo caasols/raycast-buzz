@@ -18,6 +18,24 @@ import {
 
 beforeEach(() => __resetLocalStorage());
 
+describe("presets storage contract", () => {
+  it("keeps the storage keys stable, since changing either orphans saved presets", () => {
+    expect(PRESETS_KEY).toBe("buzz.status.presets");
+    expect(SEEDED_KEY).toBe("buzz.status.presetsSeeded");
+  });
+
+  it("ships exactly the designed starter presets", () => {
+    expect(STARTER_PRESETS).toEqual([
+      { emoji: "\u{1F4C5}", text: "In a meeting" },
+      { emoji: "\u{1F9E0}", text: "Focus time" },
+      { emoji: "\u{1F374}", text: "Lunch" },
+      { emoji: "\u{1F3D6}", text: "Out of office" },
+      { emoji: "\u{1F3E1}", text: "Working remotely" },
+      { emoji: "\u{1F334}", text: "On holiday" },
+    ]);
+  });
+});
+
 describe("listPresets seeding", () => {
   it("seeds the starter presets on a first run", async () => {
     const presets = await listPresets();
@@ -98,6 +116,13 @@ describe("presets CRUD", () => {
     const created = await createPreset({ emoji: "  \u{1F41D}  ", text: "  Buzzing  " });
     expect(created).toMatchObject({ emoji: "\u{1F41D}", text: "Buzzing" });
   });
+
+  it("trims the emoji and the text on update too", async () => {
+    const seeded = await listPresets();
+    await updatePreset(seeded[0].id, { emoji: "  \u{1F525}  ", text: "  Renamed  " });
+    const after = await listPresets();
+    expect(after[0]).toEqual({ id: seeded[0].id, emoji: "\u{1F525}", text: "Renamed" });
+  });
 });
 
 describe("presets resilience", () => {
@@ -120,5 +145,29 @@ describe("presets resilience", () => {
       JSON.stringify([{ id: "a", emoji: "\u{1F41D}", text: "Good" }, { nope: true }, null]),
     );
     expect(await listPresets()).toEqual([{ id: "a", emoji: "\u{1F41D}", text: "Good" }]);
+  });
+
+  it("drops an entry missing any single preset field", async () => {
+    // One case per field: each of id, emoji and text must be required on its
+    // own, not only all three together.
+    const good = { id: "a", emoji: "\u{1F41D}", text: "Good" };
+    await LocalStorage.setItem(SEEDED_KEY, "true");
+    await LocalStorage.setItem(
+      PRESETS_KEY,
+      JSON.stringify([
+        good,
+        { emoji: "\u{1F41D}", text: "no id" },
+        { id: "b", text: "no emoji" },
+        { id: "c", emoji: "\u{1F41D}" },
+      ]),
+    );
+    expect(await listPresets()).toEqual([good]);
+  });
+
+  it("treats a seeded flag with no stored list as an empty list", async () => {
+    // The seeded flag survives a cleared presets value; that state must read
+    // as "no presets" rather than re-seeding or inventing entries.
+    await LocalStorage.setItem(SEEDED_KEY, "true");
+    expect(await listPresets()).toEqual([]);
   });
 });
