@@ -55,3 +55,8 @@ __pycache__/
 .nuxt
 .svelte-kit
 .turbo
+
+# stryker mutation testing
+.stryker-tmp/
+reports/
+stryker.log

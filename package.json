@@ -56,6 +56,11 @@
     }
   ],
   "tools": [],
+  "overrides": {
+    "typed-rest-client": {
+      "qs": "^6.15.3"
+    }
+  },
   "dependencies": {
     "@raycast/api": "^2.0.5",
     "@raycast/utils": "^2.2.7",
@@ -63,6 +68,8 @@
   },
   "devDependencies": {
     "@raycast/eslint-config": "^2.2.0",
+    "@stryker-mutator/core": "^10.0.0",
+    "@stryker-mutator/vitest-runner": "^10.0.0",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
@@ -88,6 +95,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:mutation": "stryker run",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "smoke": "tsx scripts/smoke.ts"
   }
