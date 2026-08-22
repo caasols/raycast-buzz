@@ -57,7 +57,7 @@
   ],
   "tools": [],
   "dependencies": {
-    "@raycast/api": "^1.104.20",
+    "@raycast/api": "^2.0.5",
     "@raycast/utils": "^2.2.7",
     "nostr-tools": "^2.24.1"
   },
@@ -68,7 +68,7 @@
     "@testing-library/react": "^16.3.2",
     "@types/node": "22.19.17",
     "@types/react": "19.0.10",
-    "@vitest/coverage-v8": "^2.1.9",
+    "@vitest/coverage-v8": "^4.1.11",
     "eslint": "^10.5.0",
     "jsdom": "^25.0.1",
     "prettier": "^3.8.5",
@@ -76,7 +76,7 @@
     "react-dom": "^19.0.0",
     "tsx": "^4.23.1",
     "typescript": "^6.0.3",
-    "vitest": "^2.1.9"
+    "vitest": "^4.1.11"
   },
   "scripts": {
     "build": "ray build",
